@@ -8,20 +8,14 @@ import { requireUser } from "@/server/auth/session";
 import { idSchema } from "@/server/departments/schema";
 import { getMyRepository } from "@/server/repositories/queries";
 import { GENERIC_MESSAGE, PERMISSION_MESSAGE } from "@/server/requirements/errors";
-import {
-  type SnapshotActionResult,
-  type SnapshotFormState,
-  createSnapshotSchema,
-  failureMessageSchema,
-  isAllowedSnapshotTransition,
-  snapshotStatusPatch,
-  snapshotStatusSchema,
-} from "./schema";
+import { type SnapshotActionResult, type SnapshotFormState, createSnapshotSchema } from "./schema";
 
 // Every action verifies the session server-side, validates input, then lets the database (RLS, constraints
 // and the lifecycle trigger) decide. Ids from the browser are only targets, never proof of authority.
 // The repository is resolved from the verified project on the server (never taken from the client), and
 // a new snapshot is always PENDING. Metadata only: no provider call, no cloning, no file content.
+// There is no action that changes a snapshot's status: clients have no UPDATE privilege on snapshots, and the
+// lifecycle moves only through the ingestion functions (see src/server/repository-sources/ingestion.ts).
 
 const projectIdsSchema = z.object({
   organizationId: idSchema,
@@ -78,7 +72,7 @@ export async function createSnapshot(
   if (!repository) return { error: "Connect a repository to this project first." };
 
   const supabase = await createClient();
-  const { error } = await supabase.rpc("create_repository_snapshot", {
+  const { data, error } = await supabase.rpc("create_repository_snapshot", {
     p_repository_id: repository.id,
     p_commit_sha: fields.data.commitSha,
     p_branch: fields.data.branch,
@@ -86,61 +80,8 @@ export async function createSnapshot(
   if (error) return { error: toErrorMessage(error) };
 
   revalidateSnapshots(ids.data);
-  redirect(repositoryPath(ids.data) + "/snapshots");
-}
-
-export async function updateSnapshotStatus(
-  organizationId: string,
-  departmentId: string,
-  teamId: string,
-  projectId: string,
-  snapshotId: string,
-  status: string,
-  failureMessage?: string,
-): Promise<SnapshotActionResult> {
-  await requireUser();
-
-  const ids = snapshotIdsSchema.safeParse({ organizationId, departmentId, teamId, projectId, snapshotId });
-  const next = snapshotStatusSchema.safeParse(status);
-  const message = failureMessageSchema.safeParse(failureMessage ?? "");
-  if (!ids.success) return { error: "Invalid snapshot." };
-  if (!next.success) return { error: "Invalid status." };
-  if (!message.success) return { error: "The failure message is too long." };
-
-  // Scoped to the project's own repository, so a snapshot id from another project is simply not found.
-  const repository = await getMyRepository(ids.data.projectId);
-  if (!repository) return { error: PERMISSION_MESSAGE };
-
-  const supabase = await createClient();
-  const { data: current, error: readError } = await supabase
-    .from("repository_snapshots")
-    .select("status")
-    .eq("id", ids.data.snapshotId)
-    .eq("repository_id", repository.id)
-    .maybeSingle();
-  if (readError) return { error: toErrorMessage(readError) };
-  if (!current) return { error: PERMISSION_MESSAGE };
-
-  const from = snapshotStatusSchema.safeParse(current.status);
-  if (!from.success) return { error: GENERIC_MESSAGE };
-  if (from.data === next.data) return {};
-  if (!isAllowedSnapshotTransition(from.data, next.data)) {
-    return { error: `A ${from.data} snapshot cannot move to ${next.data}.` };
-  }
-
-  // `.eq("status", from)` makes the change a compare-and-set, so a concurrent change is not overwritten.
-  const { data, error } = await supabase
-    .from("repository_snapshots")
-    .update(snapshotStatusPatch(next.data, new Date(), message.data))
-    .eq("id", ids.data.snapshotId)
-    .eq("repository_id", repository.id)
-    .eq("status", from.data)
-    .select("id");
-  if (error) return { error: toErrorMessage(error) };
-  if (data.length === 0) return { error: PERMISSION_MESSAGE };
-
-  revalidateSnapshots(ids.data);
-  return {};
+  // Straight to the new snapshot, where its source archive is uploaded.
+  redirect(repositoryPath(ids.data) + "/snapshots" + (data[0] ? `/${data[0].id}` : ""));
 }
 
 // Removes the snapshot together with its file manifest (cascade). There is no soft delete.

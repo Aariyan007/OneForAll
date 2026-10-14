@@ -33,7 +33,7 @@ export default async function NewSnapshotPage({
         description={`Record ${repository.owner} / ${repository.name} at a specific commit.`}
       />
       <div className="flex flex-col gap-4">
-        <Alert tone="info">This records a snapshot of the repository at a commit. It starts as pending; nothing is cloned or analysed yet.</Alert>
+        <Alert tone="info">This records a reference to a branch and commit. It does not download any code: OneForAll does not fetch repositories from GitHub or GitLab. After creating it you upload a ZIP of that commit on the snapshot page, which records the files and analyses their structure.</Alert>
         <Card>
           <CardHeader icon={<IconCommit size={16} />} title="Snapshot details" />
           <div className="px-5 py-5">

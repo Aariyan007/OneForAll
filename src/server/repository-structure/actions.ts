@@ -7,9 +7,9 @@ import { requireUser } from "@/server/auth/session";
 import { idSchema } from "@/server/departments/schema";
 import { getMyRepository } from "@/server/repositories/queries";
 import { GENERIC_MESSAGE, PERMISSION_MESSAGE } from "@/server/requirements/errors";
-import { runStructureAnalysis } from "./analyzer";
 import { getAnalysisReadiness } from "./readiness";
-import { type AnalysisActionResult, type AnalysisActionState, analysisStatusSchema } from "./schema";
+import { analyzeSnapshot } from "./run";
+import type { AnalysisActionResult, AnalysisActionState } from "./schema";
 import { getSourceProvider } from "./source";
 
 // Every action verifies the session server-side, validates input, then lets the database (RLS, constraints and the
@@ -70,46 +70,7 @@ export async function analyzeStructure(
   const repository = await getMyRepository(ids.data.projectId);
   if (!repository) return { error: PERMISSION_MESSAGE };
 
-  const supabase = await createClient();
-  const { data: snapshot, error: snapshotError } = await supabase
-    .from("repository_snapshots")
-    .select("id, status")
-    .eq("id", ids.data.snapshotId)
-    .eq("repository_id", repository.id)
-    .maybeSingle();
-  if (snapshotError) return { error: toErrorMessage(snapshotError) };
-  if (!snapshot) return { error: PERMISSION_MESSAGE };
-  if (snapshot.status !== "COMPLETED") return { error: "Only a completed snapshot can be analysed." };
-
-  const { data: existing, error: existingError } = await supabase
-    .from("repository_structure_analyses")
-    .select("id, status")
-    .eq("snapshot_id", snapshot.id)
-    .maybeSingle();
-  if (existingError) return { error: toErrorMessage(existingError) };
-
-  let analysisId: string;
-  if (!existing) {
-    const { data, error } = await supabase.rpc("create_structure_analysis", { p_snapshot_id: snapshot.id });
-    if (error || !data[0]) return { error: error ? toErrorMessage(error) : GENERIC_MESSAGE };
-    analysisId = data[0].id;
-  } else {
-    const status = analysisStatusSchema.safeParse(existing.status);
-    if (!status.success) return { error: GENERIC_MESSAGE };
-    if (status.data === "PROCESSING") return { error: "An analysis is already in progress." };
-    if (status.data === "COMPLETED") {
-      return { error: "This snapshot is already analysed. Delete the analysis to run it again." };
-    }
-    analysisId = existing.id;
-    if (status.data === "FAILED") {
-      // FAILED -> PENDING inside the database: clears the failure, metrics and the old run token.
-      const { data, error } = await supabase.rpc("reset_structure_analysis", { p_analysis_id: analysisId });
-      if (error) return { error: toErrorMessage(error) };
-      if (data.length === 0) return { error: PERMISSION_MESSAGE };
-    }
-  }
-
-  const outcome = await runStructureAnalysis(analysisId, getSourceProvider());
+  const outcome = await analyzeSnapshot(ids.data.snapshotId, repository.id, getSourceProvider());
   revalidateProject(ids.data);
   // A recorded failure is shown from the analysis itself (status FAILED + message); only an unrecorded one is an action error.
   if (!outcome.ok && !outcome.recorded) return { error: outcome.error };

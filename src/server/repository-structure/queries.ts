@@ -16,3 +16,12 @@ export async function getAnalysisForSnapshot(snapshotId: string) {
   if (error) throw new Error(`Failed to load structure analysis: ${error.message}`);
   return data;
 }
+
+// Analysis status per snapshot, for a list of snapshots. RLS returns only analyses of snapshots the caller may see.
+export async function getAnalysisStatuses(snapshotIds: readonly string[]): Promise<Map<string, string>> {
+  if (snapshotIds.length === 0) return new Map();
+  const supabase = await createClient();
+  const { data, error } = await supabase.from("repository_structure_analyses").select("snapshot_id, status").in("snapshot_id", [...snapshotIds]);
+  if (error) throw new Error(`Failed to load structure analyses: ${error.message}`);
+  return new Map(data.map((row) => [row.snapshot_id, row.status]));
+}

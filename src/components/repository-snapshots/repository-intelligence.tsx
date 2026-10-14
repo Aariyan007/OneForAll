@@ -122,8 +122,19 @@ export async function RepositoryIntelligence({
                   </p>
                 </div>
               </div>
-              <StatusBadge kind="snapshot" value={latest.status} label={statusLabel(latest.status)} />
+              <div className="flex shrink-0 items-center gap-2">
+                <StatusBadge kind="snapshot" value={latest.status} label={statusLabel(latest.status)} />
+                <ButtonLink href={`${repositoryPath}/snapshots/${latest.id}`} variant={canManage && (latest.status === "PENDING" || latest.status === "FAILED") ? "primary" : "secondary"} size="sm">
+                  {canManage && (latest.status === "PENDING" || latest.status === "FAILED") ? "Upload source" : "Open snapshot"}
+                  <IconArrowRight size={13} />
+                </ButtonLink>
+              </div>
             </div>
+            {latest.status === "PENDING" && latest.fileCount === 0 && (
+              <p className="t-small border-t border-border px-5 py-2.5 text-fg-3">
+                No source recorded yet. Snapshots are not downloaded from GitHub or GitLab; upload a ZIP of this commit to record its files.
+              </p>
+            )}
             <div className="grid grid-cols-1 border-t border-border sm:grid-cols-3">
               <Fact icon={<IconBranch size={13} />} label="Branch" value={<span className="font-mono">{latest.branch}</span>} />
               <Fact icon={<IconFileCode size={13} />} label="Files recorded" value={<span className="tabular-nums">{latest.fileCount}</span>} />
@@ -179,6 +190,13 @@ export async function RepositoryIntelligence({
                           unsupported={analysis.files_unsupported}
                           failed={analysis.files_failed}
                         />
+                        <div>
+                          <ButtonLink href={`${repositoryPath}/snapshots/${analyzable.id}/graph`} variant="primary" size="sm">
+                            <IconNetwork size={14} />
+                            View Repository Graph
+                            <IconArrowRight size={13} />
+                          </ButtonLink>
+                        </div>
                       </>
                     )}
                     {analysis.status === "PROCESSING" && (
@@ -202,7 +220,19 @@ export async function RepositoryIntelligence({
                 )}
                 {/* UI hint only. The database enforces who may actually run an analysis. */}
                 {!readiness.ready && (!analysis || analysis.status === "PENDING" || analysis.status === "FAILED") && (
-                  <Alert tone="info">{readiness.message}</Alert>
+                  <Alert tone="info">
+                    {canManage ? (
+                      <>
+                        Analysis needs the snapshot&apos;s source.{" "}
+                        <Link href={`${repositoryPath}/snapshots/${analyzable.id}`} className="underline underline-offset-2 hover:text-fg">
+                          Upload its archive to analyse it
+                        </Link>
+                        .
+                      </>
+                    ) : (
+                      readiness.message
+                    )}
+                  </Alert>
                 )}
                 {canRun && readiness.ready && (
                   <div>

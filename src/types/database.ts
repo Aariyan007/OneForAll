@@ -171,6 +171,26 @@ isOneToOne: false
       referencedColumns: ["id"]
     }
                   ]
+                },"repository_snapshot_sources": {
+                  Row: {
+                    "archive_bytes": number,"archive_commit": string | null,"archive_format": string,"archive_sha256": string,"created_at": string,"entries_total": number,"files_accepted": number,"files_skipped": number,"files_skipped_generated": number | null,"files_skipped_metadata": number | null,"files_skipped_oversized": number | null,"snapshot_id": string,"source_kind": string,"uploaded_by": string | null,"verification": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "archive_bytes": number,"archive_commit"?: string | null,"archive_format": string,"archive_sha256": string,"created_at"?: string,"entries_total": number,"files_accepted": number,"files_skipped": number,"files_skipped_generated"?: number | null,"files_skipped_metadata"?: number | null,"files_skipped_oversized"?: number | null,"snapshot_id": string,"source_kind": string,"uploaded_by"?: string | null,"verification"?: string
+                  }
+                  Update: {
+                    "archive_bytes"?: number,"archive_commit"?: string | null,"archive_format"?: string,"archive_sha256"?: string,"created_at"?: string,"entries_total"?: number,"files_accepted"?: number,"files_skipped"?: number,"files_skipped_generated"?: number | null,"files_skipped_metadata"?: number | null,"files_skipped_oversized"?: number | null,"snapshot_id"?: string,"source_kind"?: string,"uploaded_by"?: string | null,"verification"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "repository_snapshot_sources_snapshot_id_fkey"
+      columns: ["snapshot_id"]
+isOneToOne: true
+      referencedRelation: "repository_snapshots"
+      referencedColumns: ["id"]
+    }
+                  ]
                 },"repository_snapshots": {
                   Row: {
                     "branch": string,"commit_sha": string,"completed_at": string | null,"created_at": string,"error_message": string | null,"id": string,"repository_id": string,"started_at": string | null,"status": string
@@ -355,7 +375,12 @@ isOneToOne: false
             [_ in never]: never
           }
           Functions: {
-            "begin_structure_analysis":
+            "begin_snapshot_ingestion":
+{ Args: { "p_snapshot_id": string }; Returns: {
+              "run_token": string,"snapshot_id": string
+            }[]
+                           },
+"begin_structure_analysis":
 { Args: { "p_analysis_id": string }; Returns: {
               "analysis_id": string,"run_token": string
             }[]
@@ -405,6 +430,16 @@ isOneToOne: false
               "department_id": string,"description": string,"id": string,"name": string,"slug": string
             }[]
                            },
+"fail_snapshot_ingestion":
+{ Args: { "p_error_message": string,"p_run_token": string,"p_snapshot_id": string }; Returns: {
+              "snapshot_id": string,"status": string
+            }[]
+                           },
+"fail_stale_snapshot_ingestion":
+{ Args: { "p_snapshot_id": string }; Returns: {
+              "snapshot_id": string,"status": string
+            }[]
+                           },
 "fail_structure_analysis":
 { Args: { "p_analysis_id": string,"p_error_message": string }; Returns: {
               "analysis_id": string,"status": string
@@ -415,6 +450,11 @@ isOneToOne: false
                            },
 "is_org_member":
 { Args: { "p_org_id": string }; Returns: boolean
+                           },
+"persist_snapshot_manifest":
+{ Args: { "p_files": Json,"p_run_token": string,"p_signature": string,"p_snapshot_id": string,"p_source": Json }; Returns: {
+              "files_count": number,"snapshot_id": string,"status": string
+            }[]
                            },
 "persist_structure_analysis":
 { Args: { "p_analysis_id": string,"p_files_analyzed": number,"p_files_failed": number,"p_files_total": number,"p_files_unsupported": number,"p_relationships": Json,"p_run_token": string,"p_signature": string,"p_symbols": Json }; Returns: {

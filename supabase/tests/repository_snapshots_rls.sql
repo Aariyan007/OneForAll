@@ -1,5 +1,9 @@
 -- Phase 2G authorization, isolation, integrity and lifecycle checks for repository snapshots and the file manifest.
 -- One transaction, rolled back at the end.
+-- Since migration 20261018000001 clients have NO direct write path to the manifest or the snapshot lifecycle: every
+-- OWNER/ADMIN direct INSERT/DELETE on repository_files and UPDATE on repository_snapshots is denied, and the lifecycle
+-- moves only through begin/persist/fail_snapshot_ingestion (fully covered by repository_manifest_lifecycle_rls.sql).
+-- Table CHECKs, uniqueness and the lifecycle trigger hold for every writer, so they are exercised here as superuser.
 --   docker exec -i supabase_db_OneForAll psql -U postgres -v ON_ERROR_STOP=1 < supabase/tests/repository_snapshots_rls.sql
 
 begin;
@@ -225,34 +229,55 @@ begin
   select count(*) into n from public.repository_snapshots where repository_id = repo_empty; assert n = 0, 'a repository with no snapshots yields none';
   select count(*) into n from public.repository_snapshots where repository_id = repo_a; assert n = 3, 'a repository can have multiple snapshots, saw ' || n;
 
-  ---------------------------------------------------------------- SNAPSHOT: update/delete by role, cross-tenant, immutability
+  ---------------------------------------------------------------- SNAPSHOT: no direct UPDATE by anyone; lifecycle via the ingestion functions; delete by role
+  for v in select uid, who from (values (owner1,'OWNER'),(admin1,'ADMIN'),(ma,'team MEMBER'),(mb,'wrong-team MEMBER'),(owner2,'org 2 OWNER')) as x(uid, who) loop
+    perform set_config('request.jwt.claims', json_build_object('sub',v.uid,'role','authenticated')::text, true);
+    for c in select clause from unnest(array[
+        'status = ''PROCESSING'', started_at = now()', 'status = ''FAILED'', completed_at = now(), error_message = ''x''',
+        'status = ''COMPLETED'', completed_at = now()', 'error_message = ''x''', 'started_at = now()', 'completed_at = now()']) as clause
+    loop
+      foreach s in array array[s_a, s_b, s_bb] loop
+        caught := false;
+        begin execute 'update public.repository_snapshots set ' || c.clause || ' where id = $1' using s;
+        exception when insufficient_privilege then caught := true; end;
+        assert caught, format('%s: direct snapshot UPDATE (%s) must be denied', v.who, c.clause);
+      end loop;
+    end loop;
+  end loop;
+  -- The lifecycle moves through the ingestion functions, which re-check OWNER/ADMIN themselves.
   perform set_config('request.jwt.claims', json_build_object('sub',owner1,'role','authenticated')::text, true);
-  update public.repository_snapshots set status = 'PROCESSING', started_at = now() where id = s_a2;
-  get diagnostics n = row_count; assert n = 1, 'OWNER moves snapshot to PROCESSING';
+  perform public.begin_snapshot_ingestion(s_a2);
+  select status into r from public.repository_snapshots where id = s_a2;
+  assert r.status = 'PROCESSING', 'OWNER moves snapshot to PROCESSING (begin_snapshot_ingestion)';
   perform set_config('request.jwt.claims', json_build_object('sub',admin1,'role','authenticated')::text, true);
-  update public.repository_snapshots set status = 'PROCESSING', started_at = now() where id = s_b;
-  get diagnostics n = row_count; assert n = 1, 'ADMIN updates snapshot of a team they are not in';
-  update public.repository_snapshots set status = 'FAILED' where id = s_bb;
-  get diagnostics n = row_count; assert n = 0, 'org 1 admin must not update org 2 snapshot';
+  select id into s from public.create_repository_snapshot(repo_b, repeat('f',40), 'main');
+  perform public.begin_snapshot_ingestion(s);
+  select status into r from public.repository_snapshots where id = s;
+  assert r.status = 'PROCESSING', 'ADMIN moves a snapshot of a team they are not in to PROCESSING (begin_snapshot_ingestion)';
+  delete from public.repository_snapshots where id = s;
+  caught := false; begin perform public.begin_snapshot_ingestion(s_bb); exception when insufficient_privilege then caught := true; end;
+  assert caught, 'org 1 admin must not start ingestion of an org 2 snapshot';
   delete from public.repository_snapshots where id = s_bb;
   get diagnostics n = row_count; assert n = 0, 'org 1 admin must not delete org 2 snapshot';
   perform set_config('request.jwt.claims', json_build_object('sub',ma,'role','authenticated')::text, true);
-  update public.repository_snapshots set status = 'PROCESSING' where id = s_a;
-  get diagnostics n = row_count; assert n = 0, 'team MEMBER (can read) must not change snapshot state';
-  update public.repository_snapshots set error_message = 'x' where id = s_a;
-  get diagnostics n = row_count; assert n = 0, 'team MEMBER must not update snapshot';
+  caught := false; begin perform public.begin_snapshot_ingestion(s_a); exception when insufficient_privilege then caught := true; end;
+  assert caught, 'team MEMBER (can read) must not change snapshot state';
   delete from public.repository_snapshots where id = s_a;
   get diagnostics n = row_count; assert n = 0, 'team MEMBER must not delete snapshot';
   perform set_config('request.jwt.claims', json_build_object('sub',mb,'role','authenticated')::text, true);
-  update public.repository_snapshots set status = 'PROCESSING' where id = s_a;
-  get diagnostics n = row_count; assert n = 0, 'wrong-team MEMBER must not update snapshot';
+  caught := false; begin perform public.begin_snapshot_ingestion(s_a); exception when insufficient_privilege then caught := true; end;
+  assert caught, 'wrong-team MEMBER must not change snapshot state';
   delete from public.repository_snapshots where id = s_a;
   get diagnostics n = row_count; assert n = 0, 'wrong-team MEMBER must not delete snapshot';
   perform set_config('request.jwt.claims', json_build_object('sub',owner2,'role','authenticated')::text, true);
-  update public.repository_snapshots set status = 'PROCESSING' where id = s_a;
-  get diagnostics n = row_count; assert n = 0, 'org 2 owner must not update org 1 snapshot';
+  caught := false; begin perform public.begin_snapshot_ingestion(s_a); exception when insufficient_privilege then caught := true; end;
+  assert caught, 'org 2 owner must not change org 1 snapshot state';
   delete from public.repository_snapshots where id = s_a;
   get diagnostics n = row_count; assert n = 0, 'org 2 owner must not delete org 1 snapshot';
+  reset role;
+  select count(*) into n from public.repository_snapshots where id in (s_a, s_b, s_bb) and status = 'PENDING';
+  assert n = 3, 'no denied call changed a snapshot';
+  set local role authenticated;
 
   perform set_config('request.jwt.claims', json_build_object('sub',owner1,'role','authenticated')::text, true);
   caught := false; begin update public.repository_snapshots set repository_id = repo_empty where id = s_a; exception when insufficient_privilege then caught := true; end;
@@ -269,6 +294,8 @@ begin
   assert caught, 'snapshot id is immutable';
 
   ---------------------------------------------------------------- SNAPSHOT: lifecycle, every (from, to) pair
+  -- Clients cannot UPDATE snapshots at all (checked above); the lifecycle trigger guards every writer, so the matrix
+  -- runs as superuser (the identity the SECURITY DEFINER ingestion functions also write with).
   select id into s from public.create_repository_snapshot(repo_empty, repeat('9',40), 'main');
   for v in
     select fr, tg, ok from (values
@@ -285,26 +312,23 @@ begin
     set local session_replication_role = origin;
     set local role authenticated;
     perform set_config('request.jwt.claims', json_build_object('sub',owner1,'role','authenticated')::text, true);
-    caught := false; n := -1;
+    caught := false;
+    begin update public.repository_snapshots set status = v.tg where id = s; exception when insufficient_privilege then caught := true; end;
+    assert caught, format('client UPDATE %s -> %s denied (no UPDATE privilege)', v.fr, v.tg);
+    reset role;
+    caught := false;
     begin
       update public.repository_snapshots set status = v.tg,
              completed_at = case when v.tg = 'COMPLETED' then now() else completed_at end where id = s;
-      get diagnostics n = row_count;
     exception when check_violation then caught := true; end;
-    if v.fr = 'COMPLETED' then
-      -- COMPLETED is terminal: RLS no longer lets any UPDATE reach the row (0 rows, no error), including same-status.
-      assert not caught and n = 0, format('COMPLETED -> %s: the row is sealed by RLS (expected 0 rows, no error; got rows=%s caught=%s)', v.tg, n, caught);
-    else
-      assert caught = not v.ok, format('snapshot transition %s -> %s: expected %s', v.fr, v.tg, case when v.ok then 'allowed' else 'rejected' end);
-    end if;
+    assert caught = not v.ok, format('snapshot transition %s -> %s: expected %s', v.fr, v.tg, case when v.ok then 'allowed' else 'rejected' end);
     select status into r from public.repository_snapshots where id = s;
-    assert r.status = case when v.ok and v.fr <> 'COMPLETED' then v.tg else v.fr end, format('snapshot %s -> %s left wrong status %s', v.fr, v.tg, r.status);
+    assert r.status = case when v.ok then v.tg else v.fr end, format('snapshot %s -> %s left wrong status %s', v.fr, v.tg, r.status);
   end loop;
   caught := false; begin update public.repository_snapshots set status = 'DONE' where id = s; exception when check_violation then caught := true; end;
   assert caught, 'unknown status rejected on update';
   -- COMPLETED requires completed_at; the retry path clears it.
-  reset role; set local session_replication_role = replica; update public.repository_snapshots set status = 'PROCESSING', started_at = now(), completed_at = null where id = s; set local session_replication_role = origin;
-  set local role authenticated; perform set_config('request.jwt.claims', json_build_object('sub',owner1,'role','authenticated')::text, true);
+  set local session_replication_role = replica; update public.repository_snapshots set status = 'PROCESSING', started_at = now(), completed_at = null where id = s; set local session_replication_role = origin;
   caught := false; begin update public.repository_snapshots set status = 'COMPLETED' where id = s; exception when check_violation then caught := true; end;
   assert caught, 'PROCESSING -> COMPLETED without completed_at rejected by CHECK';
   update public.repository_snapshots set status = 'FAILED', completed_at = now(), error_message = 'ingestion failed' where id = s;
@@ -333,9 +357,10 @@ begin
         'status = ''FAILED'', completed_at = now(), error_message = ''x'''  -- everything at once
       ]) as clause
     loop
-      execute 'update public.repository_snapshots set ' || c.clause || ' where id = $1' using s;
-      get diagnostics n = row_count;
-      assert n = 0, format('%s must not modify a COMPLETED snapshot (%s) but affected % row(s)', v.who, c.clause, n);
+      caught := false;
+      begin execute 'update public.repository_snapshots set ' || c.clause || ' where id = $1' using s;
+      exception when insufficient_privilege then caught := true; end;
+      assert caught, format('%s must not modify a COMPLETED snapshot (%s)', v.who, c.clause);
     end loop;
   end loop;
   reset role;
@@ -355,26 +380,30 @@ begin
   perform set_config('request.jwt.claims', json_build_object('sub', admin1, 'role', 'authenticated')::text, true);
   delete from public.repository_snapshots where id = s; get diagnostics n = row_count;
   assert n = 1, 'ADMIN can still delete the sealed COMPLETED snapshot';
+  -- An in-flight snapshot cannot be completed by a direct UPDATE (only by a signed manifest, see
+  -- repository_manifest_lifecycle_rls.sql); a failed one is retried through begin_snapshot_ingestion.
   select id into s from public.create_repository_snapshot(repo_empty, repeat('3',40), 'main');
-  update public.repository_snapshots set status = 'PROCESSING', started_at = now() where id = s;
-  update public.repository_snapshots set status = 'COMPLETED', completed_at = now() where id = s;
-  get diagnostics n = row_count; assert n = 1, 'PROCESSING -> COMPLETED still works under the new policy';
-  update public.repository_snapshots set error_message = 'late' where id = s;
-  get diagnostics n = row_count; assert n = 0, 'and once completed it is sealed immediately';
+  select run_token into c from public.begin_snapshot_ingestion(s);
+  caught := false; begin update public.repository_snapshots set status = 'COMPLETED', completed_at = now() where id = s; exception when insufficient_privilege then caught := true; end;
+  assert caught, 'PROCESSING -> COMPLETED is not possible by a direct UPDATE';
+  perform public.fail_snapshot_ingestion(s, c.run_token, 'boom');
   perform set_config('request.jwt.claims', json_build_object('sub', owner1, 'role', 'authenticated')::text, true);
-  select id into s from public.create_repository_snapshot(repo_empty, repeat('2',40), 'main');
-  update public.repository_snapshots set status = 'FAILED', completed_at = now(), error_message = 'boom' where id = s;
-  update public.repository_snapshots set status = 'PENDING', started_at = null, completed_at = null, error_message = null where id = s;
-  get diagnostics n = row_count; assert n = 1, 'FAILED -> PENDING retry still works under the new policy';
-  update public.repository_snapshots set status = 'PROCESSING', started_at = now() where id = s;
-  get diagnostics n = row_count; assert n = 1, 'and the retried snapshot can be processed again';
+  perform public.begin_snapshot_ingestion(s);
+  select status, error_message into r from public.repository_snapshots where id = s;
+  assert r.status = 'PROCESSING' and r.error_message is null, 'FAILED -> PENDING -> PROCESSING retry works through begin_snapshot_ingestion';
 
   ---------------------------------------------------------------- FILES: create, validation, uniqueness
-  perform set_config('request.jwt.claims', json_build_object('sub',owner1,'role','authenticated')::text, true);
+  -- OWNER/ADMIN have no direct INSERT; the table rules below hold for every writer, so they run as superuser.
+  for v in select uid, who from (values (owner1,'OWNER'),(admin1,'ADMIN')) as x(uid, who) loop
+    perform set_config('request.jwt.claims', json_build_object('sub',v.uid,'role','authenticated')::text, true);
+    caught := false;
+    begin insert into public.repository_files (snapshot_id,path,language,size_bytes,content_hash) values (s_a,'src/direct.ts','TypeScript',1,h1); exception when insufficient_privilege then caught := true; end;
+    assert caught, v.who || ' must not insert manifest rows directly';
+  end loop;
+  reset role;
   insert into public.repository_files (snapshot_id,path,language,size_bytes,content_hash) values (s_a,'src/app/page.tsx','TypeScript',1234,h1) returning id into f;
   select * into r from public.repository_files where id = f;
   assert r.content_hash = h1 and r.size_bytes = 1234 and r.language = 'TypeScript' and r.path = 'src/app/page.tsx' and r.created_at is not null, 'valid file stored with hash and size';
-  perform set_config('request.jwt.claims', json_build_object('sub',admin1,'role','authenticated')::text, true);
   insert into public.repository_files (snapshot_id,path,language,size_bytes,content_hash) values (s_a,'README.md','Markdown',0,h2);
   insert into public.repository_files (snapshot_id,path,size_bytes,content_hash) values (s_a,'LICENSE',9999999999,h1);
   select * into r from public.repository_files where snapshot_id = s_a and path = 'README.md';
@@ -391,7 +420,6 @@ begin
   -- change detection: same path, same hash across snapshots = unchanged; different hash = changed
   select count(*) into n from public.repository_files a join public.repository_files b on a.path = b.path and a.snapshot_id = s_a and b.snapshot_id = s_a2 where a.content_hash = b.content_hash;
   assert n = 0, 'a path whose hash differs between snapshots is detectable as changed';
-  perform set_config('request.jwt.claims', json_build_object('sub',owner1,'role','authenticated')::text, true);
 
   for v in select p from unnest(array[
       '/etc/passwd', '/abs/path.ts', 'C:/Windows/x.ts', 'c:\Windows\x.ts', '\\server\share\x', '\abs.ts',
@@ -421,7 +449,6 @@ begin
   assert caught, 'content_hash is required';
   caught := false; begin insert into public.repository_files (path,size_bytes,content_hash) values ('orphan.txt',1,h1); exception when not_null_violation or insufficient_privilege then caught := true; end;
   assert caught, 'a file requires a snapshot';
-  reset role;
   caught := false; begin insert into public.repository_files (snapshot_id,path,size_bytes,content_hash) values ('00000000-0000-0000-0000-00000000ffff','x.txt',1,h1); exception when foreign_key_violation then caught := true; end;
   assert caught, 'file must reference an existing snapshot (FK)';
 
@@ -430,8 +457,8 @@ begin
   perform set_config('request.jwt.claims', json_build_object('sub',ma,'role','authenticated')::text, true);
   caught := false; begin insert into public.repository_files (snapshot_id,path,size_bytes,content_hash) values (s_a2,'member.txt',1,h1); exception when insufficient_privilege then caught := true; end;
   assert caught, 'team MEMBER must not insert files';
-  delete from public.repository_files where id = f; get diagnostics n = row_count;
-  assert n = 0, 'team MEMBER must not delete files';
+  caught := false; begin delete from public.repository_files where id = f; exception when insufficient_privilege then caught := true; end;
+  assert caught, 'team MEMBER must not delete files';
   select count(*) into n from public.repository_files where snapshot_id = s_a; assert n = 4, 'team MEMBER can read the file manifest';
   select count(*) into n from public.repository_files where id = f_b; assert n = 0, 'cross-team: team A member cannot see team B file';
   select count(*) into n from public.repository_files where id = f_bb; assert n = 0, 'cross-organization: org 1 member cannot see org 2 file';
@@ -451,13 +478,16 @@ begin
   assert caught, 'forged snapshot_id of another organization rejected (insert)';
   caught := false; begin insert into public.repository_files (snapshot_id,path,size_bytes,content_hash) values ('00000000-0000-0000-0000-00000000ffff','forged.txt',1,h1); exception when insufficient_privilege then caught := true; end;
   assert caught, 'nonexistent snapshot_id rejected for clients';
-  delete from public.repository_files where id = f; get diagnostics n = row_count;
-  assert n = 0, 'forged file id: org 2 owner must not delete an org 1 file';
-  delete from public.repository_files where id = f_a; get diagnostics n = row_count;
-  assert n = 0, 'forged file id (fixture): org 2 owner must not delete an org 1 file';
+  caught := false; begin delete from public.repository_files where id = f; exception when insufficient_privilege then caught := true; end;
+  assert caught, 'forged file id: org 2 owner must not delete an org 1 file';
+  caught := false; begin delete from public.repository_files where id = f_a; exception when insufficient_privilege then caught := true; end;
+  assert caught, 'forged file id (fixture): org 2 owner must not delete an org 1 file';
   perform set_config('request.jwt.claims', json_build_object('sub',admin1,'role','authenticated')::text, true);
-  delete from public.repository_files where id = f_bb; get diagnostics n = row_count;
-  assert n = 0, 'org 1 admin must not delete an org 2 file';
+  caught := false; begin delete from public.repository_files where id = f_bb; exception when insufficient_privilege then caught := true; end;
+  assert caught, 'org 1 admin must not delete an org 2 file';
+  reset role;
+  select count(*) into n from public.repository_files where id in (f, f_a, f_bb); assert n = 3, 'no denied delete removed a file';
+  set local role authenticated;
 
   ---------------------------------------------------------------- FILES: immutability (no update at all)
   perform set_config('request.jwt.claims', json_build_object('sub',owner1,'role','authenticated')::text, true);
@@ -476,34 +506,38 @@ begin
   caught := false; begin update public.repository_files set id = gen_random_uuid() where id = f; exception when insufficient_privilege then caught := true; end;
   assert caught, 'file id is immutable';
 
-  ---------------------------------------------------------------- FILES: manifest frozen once the snapshot leaves PENDING/PROCESSING
+  ---------------------------------------------------------------- FILES: no direct client write in any snapshot state; a COMPLETED manifest is sealed for every writer
+  perform set_config('request.jwt.claims', json_build_object('sub',owner1,'role','authenticated')::text, true);
   select id into s from public.create_repository_snapshot(repo_empty, repeat('8',40), 'main');
+  reset role;
   insert into public.repository_files (snapshot_id,path,size_bytes,content_hash) values (s,'a.txt',1,h1) returning id into f;
   insert into public.repository_files (snapshot_id,path,size_bytes,content_hash) values (s,'b.txt',2,h2);
-  update public.repository_snapshots set status = 'PROCESSING', started_at = now() where id = s;
-  insert into public.repository_files (snapshot_id,path,size_bytes,content_hash) values (s,'c.txt',3,h1);
-  select count(*) into n from public.repository_files where snapshot_id = s; assert n = 3, 'files may be inserted while PROCESSING';
-  update public.repository_snapshots set status = 'COMPLETED', completed_at = now() where id = s;
-  get diagnostics n = row_count; assert n = 1, 'snapshot completes';
-  caught := false; begin insert into public.repository_files (snapshot_id,path,size_bytes,content_hash) values (s,'late.txt',1,h1); exception when insufficient_privilege then caught := true; end;
-  assert caught, 'COMPLETED manifest is frozen: insert denied';
-  delete from public.repository_files where id = f; get diagnostics n = row_count;
-  assert n = 0, 'COMPLETED manifest is frozen: delete denied';
-  update public.repository_snapshots set status = 'PENDING' where id = s; get diagnostics n = row_count;
-  assert n = 0, 'COMPLETED is terminal: reopening it to ingest again affects 0 rows';
+  for v in select st from unnest(array['PENDING','PROCESSING','FAILED','COMPLETED']) as st loop
+    set local session_replication_role = replica;
+    update public.repository_snapshots set status = v.st, started_at = now(), completed_at = case when v.st in ('COMPLETED','FAILED') then now() else null end where id = s;
+    set local session_replication_role = origin;
+    for c in select uid, who from (values (owner1,'OWNER'),(admin1,'ADMIN')) as x(uid, who) loop
+      set local role authenticated;
+      perform set_config('request.jwt.claims', json_build_object('sub',c.uid,'role','authenticated')::text, true);
+      caught := false; begin insert into public.repository_files (snapshot_id,path,size_bytes,content_hash) values (s,'late.txt',1,h1); exception when insufficient_privilege then caught := true; end;
+      assert caught, format('%s snapshot: %s direct insert denied', v.st, c.who);
+      caught := false; begin delete from public.repository_files where id = f; exception when insufficient_privilege then caught := true; end;
+      assert caught, format('%s snapshot: %s direct delete denied', v.st, c.who);
+      reset role;
+    end loop;
+  end loop;
+  select count(*) into n from public.repository_files where snapshot_id = s; assert n = 2, 'the manifest is unchanged by every denied write';
+  -- s is COMPLETED now: the seal trigger refuses even a writer that bypasses grants and RLS.
+  caught := false; begin insert into public.repository_files (snapshot_id,path,size_bytes,content_hash) values (s,'late.txt',1,h1); exception when check_violation then caught := true; end;
+  assert caught, 'COMPLETED manifest is sealed: insert refused for every writer';
+  caught := false; begin delete from public.repository_files where id = f; exception when check_violation then caught := true; end;
+  assert caught, 'COMPLETED manifest is sealed: delete refused for every writer';
+  caught := false; begin update public.repository_snapshots set status = 'PENDING' where id = s; exception when check_violation then caught := true; end;
+  assert caught, 'COMPLETED is terminal: it cannot be reopened to ingest again';
   select status into r from public.repository_snapshots where id = s;
   assert r.status = 'COMPLETED', 'COMPLETED snapshot stays COMPLETED';
-  select id into s from public.create_repository_snapshot(repo_empty, repeat('7',40), 'main');
-  insert into public.repository_files (snapshot_id,path,size_bytes,content_hash) values (s,'a.txt',1,h1) returning id into f;
-  update public.repository_snapshots set status = 'FAILED', completed_at = now(), error_message = 'boom' where id = s;
-  caught := false; begin insert into public.repository_files (snapshot_id,path,size_bytes,content_hash) values (s,'late.txt',1,h1); exception when insufficient_privilege then caught := true; end;
-  assert caught, 'FAILED snapshot: insert denied until it is retried';
-  update public.repository_snapshots set status = 'PENDING', started_at = null, completed_at = null, error_message = null where id = s;
-  delete from public.repository_files where snapshot_id = s; get diagnostics n = row_count;
-  assert n = 1, 'after the retry transition the partial manifest can be cleared (OWNER delete)';
-  perform set_config('request.jwt.claims', json_build_object('sub',admin1,'role','authenticated')::text, true);
-  insert into public.repository_files (snapshot_id,path,size_bytes,content_hash) values (s,'again.txt',1,h1) returning id into f;
-  delete from public.repository_files where id = f; get diagnostics n = row_count; assert n = 1, 'ADMIN inserts and deletes manifest rows while PENDING';
+  set local role authenticated;
+  perform set_config('request.jwt.claims', json_build_object('sub',owner1,'role','authenticated')::text, true);
 
   ---------------------------------------------------------------- snapshot isolation
   select count(*) into n from public.repository_files where snapshot_id = s_a and path = 'src/index.ts'; assert n = 1, 'snapshot A has its own file';
@@ -523,7 +557,9 @@ begin
   set local role authenticated;
   perform set_config('request.jwt.claims', json_build_object('sub',owner1,'role','authenticated')::text, true);
   select id into s from public.create_repository_snapshot(repo_empty, repeat('6',40), 'main');
+  reset role;
   insert into public.repository_files (snapshot_id,path,size_bytes,content_hash) values (s,'x.txt',1,h1),(s,'y.txt',1,h1);
+  set local role authenticated;
   delete from public.repository_snapshots where id = s; get diagnostics n = row_count;
   assert n = 1, 'OWNER deletes snapshot';
   select count(*) into n from public.repository_files where snapshot_id = s; assert n = 0, 'deleting a snapshot cascades to its files';
@@ -532,9 +568,11 @@ begin
   delete from public.repository_snapshots where id = s; get diagnostics n = row_count; assert n = 1, 'ADMIN deletes snapshot';
   -- a COMPLETED snapshot (frozen manifest) can still be deleted as a whole
   select id into s from public.create_repository_snapshot(repo_empty, repeat('4',40), 'main');
+  reset role;
   insert into public.repository_files (snapshot_id,path,size_bytes,content_hash) values (s,'x.txt',1,h1);
   update public.repository_snapshots set status = 'PROCESSING', started_at = now() where id = s;
   update public.repository_snapshots set status = 'COMPLETED', completed_at = now() where id = s;
+  set local role authenticated;
   delete from public.repository_snapshots where id = s; get diagnostics n = row_count; assert n = 1, 'a COMPLETED snapshot can be deleted by OWNER/ADMIN';
   select count(*) into n from public.repository_files where snapshot_id = s; assert n = 0, '...and its frozen manifest cascades with it';
 

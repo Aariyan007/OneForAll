@@ -1,12 +1,14 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ButtonLink } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { EmptyState, MetricCard, formatDateTime } from "@/components/ui/data";
-import { IconBranch, IconCommit, IconPlus } from "@/components/ui/icons";
+import { IconArrowRight, IconBranch, IconCommit, IconNetwork, IconPlus } from "@/components/ui/icons";
 import { PageBody, PageHeader } from "@/components/ui/page";
 import { StatusBadge } from "@/components/ui/status";
 import { getRepositoryContext, listSnapshots } from "@/server/repository-snapshots/queries";
 import { STATUS_LABELS } from "@/server/repository-snapshots/schema";
+import { getAnalysisStatuses } from "@/server/repository-structure/queries";
 
 export const metadata = { title: "Snapshots · OneForAll" };
 
@@ -20,6 +22,8 @@ export default async function SnapshotsPage({
   const { organization, department, team, project, repository, canManage } = context;
 
   const snapshots = await listSnapshots(repository.id);
+  // The graph link is offered only where a completed structure analysis exists.
+  const analysisStatus = await getAnalysisStatuses(snapshots.map((s) => s.id));
   const projectPath = `/organizations/${organization.id}/departments/${department.id}/teams/${team.id}/projects/${project.id}`;
   const teamsHref = `/organizations/${organization.id}/departments/${department.id}/teams`;
   const completed = snapshots.filter((s) => s.status === "COMPLETED").length;
@@ -86,9 +90,13 @@ export default async function SnapshotsPage({
               {snapshots.map((snapshot) => (
                 <li key={snapshot.id} className="px-5 py-3.5 transition-colors hover:bg-surface-2/50">
                   <div className="grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_120px_100px_150px] md:items-center md:gap-4">
-                    <span className="truncate font-mono text-[12.5px] text-fg" title={snapshot.commit_sha}>
+                    <Link
+                      href={`${projectPath}/repository/snapshots/${snapshot.id}`}
+                      className="truncate font-mono text-[12.5px] text-fg underline-offset-2 transition-colors hover:text-accent hover:underline"
+                      title={`Open snapshot ${snapshot.commit_sha}`}
+                    >
                       {snapshot.commit_sha}
-                    </span>
+                    </Link>
                     <span className="inline-flex min-w-0 items-center gap-1 font-mono text-[12px] text-fg-2">
                       <IconBranch size={12} className="shrink-0 text-fg-3" />
                       <span className="truncate">{snapshot.branch}</span>
@@ -106,6 +114,16 @@ export default async function SnapshotsPage({
                     <span className="t-small text-fg-3">{formatDateTime(snapshot.created_at)}</span>
                   </div>
                   {snapshot.error_message && <p className="mt-2 text-[12.5px] text-danger">{snapshot.error_message}</p>}
+                  {snapshot.status === "COMPLETED" && analysisStatus.get(snapshot.id) === "COMPLETED" && (
+                    <Link
+                      href={`${projectPath}/repository/snapshots/${snapshot.id}/graph`}
+                      className="mt-2 inline-flex items-center gap-1 text-[12.5px] text-fg-2 transition-colors hover:text-accent"
+                    >
+                      <IconNetwork size={13} />
+                      View Repository Graph
+                      <IconArrowRight size={12} />
+                    </Link>
+                  )}
                 </li>
               ))}
             </ul>

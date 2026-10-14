@@ -8,6 +8,7 @@ export const MAX_PATH_LENGTH = 1024;
 
 // Ingestion/manifest filtering only: these directories are never recorded. Nothing is deleted from any
 // repository. Kept as a plain list so the rules can evolve in one place.
+// Mirrored in the database (private.manifest_payload_check, migration 20261019000001): change both together.
 export const IGNORED_DIRECTORIES = ["node_modules", ".git", "dist", "build", ".next", "coverage"] as const;
 
 // Language is inferred from the file extension alone. It is metadata, not parsing and not a claim of

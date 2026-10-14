@@ -82,19 +82,23 @@ begin
   insert into public.repositories (project_id,provider,repository_url,owner,name,default_branch,created_by) values (p_b,'GITHUB','https://github.com/acme/hiring','acme','hiring','main',owner1) returning id into repo_b;
   insert into public.repositories (project_id,provider,repository_url,owner,name,default_branch,created_by) values (p_bb,'GITHUB','https://github.com/globex/payments','globex','payments','main',owner2) returning id into repo_bb;
 
-  insert into public.repository_snapshots (repository_id,commit_sha,branch,status,started_at,completed_at) values (repo_a,repeat('a',40),'main','COMPLETED',now(),now()) returning id into s_a;
-  insert into public.repository_snapshots (repository_id,commit_sha,branch,status,started_at,completed_at) values (repo_a,repeat('b',40),'main','COMPLETED',now(),now()) returning id into s_a2;
+  -- Manifests are recorded while the snapshots are PENDING, then the snapshots are completed (a COMPLETED manifest is
+  -- sealed for every writer since migration 20261018000001).
+  insert into public.repository_snapshots (repository_id,commit_sha,branch) values (repo_a,repeat('a',40),'main') returning id into s_a;
+  insert into public.repository_snapshots (repository_id,commit_sha,branch) values (repo_a,repeat('b',40),'main') returning id into s_a2;
   insert into public.repository_snapshots (repository_id,commit_sha,branch,status,started_at,completed_at) values (repo_a,repeat('e',40),'main','COMPLETED',now(),now()) returning id into s_val;
   insert into public.repository_snapshots (repository_id,commit_sha,branch) values (repo_a,repeat('c',40),'main') returning id into s_a_pend;
   insert into public.repository_snapshots (repository_id,commit_sha,branch,status) values (repo_a,repeat('d',40),'main','FAILED') returning id into s_a_fail;
-  insert into public.repository_snapshots (repository_id,commit_sha,branch,status,started_at,completed_at) values (repo_b,repeat('a',40),'main','COMPLETED',now(),now()) returning id into s_b;
-  insert into public.repository_snapshots (repository_id,commit_sha,branch,status,started_at,completed_at) values (repo_bb,repeat('a',40),'main','COMPLETED',now(),now()) returning id into s_bb;
+  insert into public.repository_snapshots (repository_id,commit_sha,branch) values (repo_b,repeat('a',40),'main') returning id into s_b;
+  insert into public.repository_snapshots (repository_id,commit_sha,branch) values (repo_bb,repeat('a',40),'main') returning id into s_bb;
   insert into public.repository_files (snapshot_id,path,language,size_bytes,content_hash) values (s_a,'src/index.ts','TypeScript',10,h1) returning id into f_a1;
   insert into public.repository_files (snapshot_id,path,language,size_bytes,content_hash) values (s_a,'src/util.py','Python',20,h1) returning id into f_a2;
   insert into public.repository_files (snapshot_id,path,language,size_bytes,content_hash) values (s_a,'README.md',null,5,h1) returning id into f_a3;
   insert into public.repository_files (snapshot_id,path,language,size_bytes,content_hash) values (s_a2,'src/other.ts','TypeScript',10,h1) returning id into f_a2_1;
   insert into public.repository_files (snapshot_id,path,language,size_bytes,content_hash) values (s_b,'src/hiring.py','Python',20,h1) returning id into f_b;
   insert into public.repository_files (snapshot_id,path,language,size_bytes,content_hash) values (s_bb,'src/index.ts','TypeScript',10,h1) returning id into f_bb;
+  update public.repository_snapshots set status = 'PROCESSING', started_at = now() where id in (s_a, s_a2, s_b, s_bb);
+  update public.repository_snapshots set status = 'COMPLETED', completed_at = now() where id in (s_a, s_a2, s_b, s_bb);
 
   -- The HMAC key in Vault (inside this transaction only) ----------------------
   select id into vid from vault.secrets where name = 'structure_persist_key';
@@ -986,7 +990,11 @@ $c$, chr(13) || chr(10), chr(10));
   assert not exists (select 1 from public.repository_structure_analyses where id = an_bb), 'deleting a snapshot cascades to its analysis';
   assert not exists (select 1 from public.repository_symbols where analysis_id = an_bb), 'deleting a snapshot cascades to its symbols';
   assert not exists (select 1 from private.structure_analysis_runs where analysis_id = an_bb), 'deleting a snapshot cascades to its run state';
+  caught := false; begin delete from public.repository_files where id = f_a2_1; exception when check_violation then caught := true; end;
+  assert caught, 'a manifest row of a COMPLETED snapshot cannot be deleted on its own (seal trigger, 20261018000001)';
+  alter table public.repository_files disable trigger repository_files_enforce_immutability;
   begin delete from public.repository_files where id = f_a2_1; exception when foreign_key_violation then assert false, 'deleting a file must cascade to its symbols (FK)'; end;
+  alter table public.repository_files enable trigger repository_files_enforce_immutability;
 
   raise notice 'repository_structure_rls.sql: ALL ASSERTIONS PASSED';
 end;

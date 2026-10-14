@@ -2,46 +2,68 @@ import "server-only";
 import { createClient } from "@/lib/supabase/server";
 import { requireUser } from "@/server/auth/session";
 import { idSchema } from "@/server/departments/schema";
+import { KEY_MISSING_MESSAGE, getStructurePersistKey } from "@/server/repository-structure/persist-key";
 import { type ManifestInput, prepareManifest } from "./manifest";
+import { type ManifestFile, type ManifestSource, signManifest } from "./signing";
 
-// Internal ingestion entry point for a FUTURE server-side adapter (and for server-side test fixtures).
-// It is deliberately NOT a Server Action ("use server"): the browser can never call it, never supplies a
-// manifest or a filesystem path, and cannot read any file through it. It records metadata only:
-// authorization is whatever RLS allows the signed-in user to insert (OWNER/ADMIN, snapshot still
-// PENDING or PROCESSING), and nothing is stored but path, language, size and hash.
+// Internal manifest persistence for a server-side ingestion (archive upload today). It is deliberately NOT a Server
+// Action ("use server"): the browser can never call it and never supplies a manifest. Clients have no INSERT/DELETE
+// privilege on repository_files (migration 20261018000001): the manifest is written only by
+// persist_snapshot_manifest(), which requires this ingestion's one-time run token (from begin_snapshot_ingestion)
+// and an HMAC signature made with the server-only key, and which records the source, the whole manifest and the
+// COMPLETED status in one transaction. Nothing is stored but path, language, size and hash.
 
 export const MAX_FILES_PER_INGEST = 5000;
 
-export type IngestResult =
-  | { ok: true; inserted: number; skipped: { path: string; reason: string }[] }
-  | { ok: false; error: string; rejected?: { path: string; error: string }[] };
+export type PersistManifestResult =
+  | { ok: true; inserted: number }
+  | { ok: false; error: string; code?: string; rejected?: { path: string; error: string }[] };
 
-export async function ingestManifest(snapshotId: string, inputs: readonly ManifestInput[]): Promise<IngestResult> {
+export async function persistSnapshotManifest(
+  snapshotId: string,
+  runToken: string,
+  source: Omit<ManifestSource, "files_accepted">,
+  inputs: readonly ManifestInput[],
+): Promise<PersistManifestResult> {
   await requireUser();
 
   if (!idSchema.safeParse(snapshotId).success) return { ok: false, error: "Invalid snapshot." };
+  if (inputs.length === 0) return { ok: false, error: "The manifest is empty." };
   if (inputs.length > MAX_FILES_PER_INGEST) return { ok: false, error: `At most ${MAX_FILES_PER_INGEST} files per ingest.` };
 
-  const { entries, skipped, rejected } = prepareManifest(inputs);
-  // Fail closed: one unsafe or malformed entry rejects the whole batch.
+  const { entries, rejected } = prepareManifest(inputs);
+  // Fail closed: one unsafe or malformed entry rejects the whole batch, and nothing may be silently dropped.
   if (rejected.length > 0) return { ok: false, error: "The manifest contains invalid entries.", rejected };
-  if (entries.length === 0) return { ok: true, inserted: 0, skipped };
+  if (entries.length !== inputs.length) return { ok: false, error: "The manifest contains files that cannot be recorded." };
 
-  // A single INSERT statement is atomic: either every row is recorded or none is.
+  const key = getStructurePersistKey();
+  if (!key) return { ok: false, error: KEY_MISSING_MESSAGE };
+
+  const files: ManifestFile[] = entries.map((entry) => ({
+    path: entry.path,
+    language: entry.language,
+    size_bytes: entry.sizeBytes,
+    content_hash: entry.contentHash,
+  }));
+  const fullSource: ManifestSource = { ...source, files_accepted: files.length };
+  const signature = signManifest(key, { snapshotId, runToken, source: fullSource, files });
+
+  // One RPC = one transaction: verify token + signature + invariants, record source and manifest, complete the
+  // snapshot, consume the token. On any error nothing is written.
   const supabase = await createClient();
-  const { error } = await supabase.from("repository_files").insert(
-    entries.map((entry) => ({
-      snapshot_id: snapshotId,
-      path: entry.path,
-      language: entry.language,
-      size_bytes: entry.sizeBytes,
-      content_hash: entry.contentHash,
-    })),
-  );
+  const { data, error } = await supabase.rpc("persist_snapshot_manifest", {
+    p_snapshot_id: snapshotId,
+    p_run_token: runToken,
+    p_source: fullSource,
+    p_files: files,
+    p_signature: signature,
+  });
   if (error) {
-    if (error.code === "42501") return { ok: false, error: "You cannot add files to this snapshot." };
-    if (error.code === "23505") return { ok: false, error: "A path in the manifest already exists in this snapshot." };
-    return { ok: false, error: "Could not record the manifest." };
+    if (error.code === "42501") return { ok: false, error: "You cannot add files to this snapshot.", code: error.code };
+    if (error.code === "23505") return { ok: false, error: "A completed snapshot of this commit already exists.", code: error.code };
+    return { ok: false, error: "Could not record the manifest.", code: error.code };
   }
-  return { ok: true, inserted: entries.length, skipped };
+  const persisted = data[0];
+  if (!persisted || persisted.status !== "COMPLETED") return { ok: false, error: "Could not record the manifest." };
+  return { ok: true, inserted: persisted.files_count };
 }

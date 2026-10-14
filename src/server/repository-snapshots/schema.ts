@@ -28,37 +28,6 @@ export const snapshotBranchSchema = branchSchema.refine((value) => !/[\u0000-\u0
 
 export const createSnapshotSchema = z.object({ commitSha: commitShaSchema, branch: snapshotBranchSchema });
 
-export const failureMessageSchema = z.string().trim().max(2000, "Use at most 2000 characters.");
-
-// Mirrors the database trigger: PENDING -> PROCESSING | FAILED, PROCESSING -> COMPLETED | FAILED,
-// FAILED -> PENDING (retry). COMPLETED is terminal.
-const ALLOWED_TRANSITIONS: Record<SnapshotStatus, readonly SnapshotStatus[]> = {
-  PENDING: ["PROCESSING", "FAILED"],
-  PROCESSING: ["COMPLETED", "FAILED"],
-  COMPLETED: [],
-  FAILED: ["PENDING"],
-};
-
-export function isAllowedSnapshotTransition(from: SnapshotStatus, to: SnapshotStatus): boolean {
-  return ALLOWED_TRANSITIONS[from].includes(to);
-}
-
-// The mutable columns that go with each target status, so timestamps and the error message always agree
-// with the status. Retrying a failed snapshot returns it to a clean PENDING state.
-export function snapshotStatusPatch(to: SnapshotStatus, now: Date, failureMessage?: string) {
-  const timestamp = now.toISOString();
-  switch (to) {
-    case "PROCESSING":
-      return { status: to, started_at: timestamp, completed_at: null, error_message: null };
-    case "COMPLETED":
-      return { status: to, completed_at: timestamp, error_message: null };
-    case "FAILED":
-      return { status: to, completed_at: timestamp, error_message: failureMessage || "Snapshot failed." };
-    case "PENDING":
-      return { status: to, started_at: null, completed_at: null, error_message: null };
-  }
-}
-
 export type SnapshotFormState = {
   error?: string;
   fieldErrors?: { commitSha?: string[]; branch?: string[] };

@@ -173,6 +173,23 @@ export const IconPlus = (p: IconProps) => (
     <path d="M12 5v14M5 12h14" />
   </Svg>
 );
+export const IconMinus = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M5 12h14" />
+  </Svg>
+);
+export const IconFit = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M4 9V5.5A1.5 1.5 0 0 1 5.5 4H9M15 4h3.5A1.5 1.5 0 0 1 20 5.5V9M20 15v3.5a1.5 1.5 0 0 1-1.5 1.5H15M9 20H5.5A1.5 1.5 0 0 1 4 18.5V15" />
+  </Svg>
+);
+export const IconFocus = (p: IconProps) => (
+  <Svg {...p}>
+    <circle cx="12" cy="12" r="2.5" />
+    <circle cx="12" cy="12" r="7.5" />
+    <path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2" />
+  </Svg>
+);
 export const IconMenu = (p: IconProps) => (
   <Svg {...p}>
     <path d="M4 7h16M4 12h16M4 17h16" />

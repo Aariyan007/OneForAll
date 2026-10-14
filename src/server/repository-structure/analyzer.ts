@@ -27,8 +27,9 @@ import { type SourceFile, type SourceProvider, UNAVAILABLE_SOURCE_MESSAGE, getSo
 // Clients can write neither the lifecycle nor the structure; only these SECURITY DEFINER functions can, each
 // re-checking OWNER/ADMIN of the derived organization. The run token and signature never leave this module.
 
-export const MAX_SOURCE_BYTES = 1_000_000; // larger files are counted as failed, never partially read
-export const MAX_SYMBOLS_PER_ANALYSIS = 50_000;
+import { MAX_SOURCE_BYTES, MAX_SYMBOLS_PER_ANALYSIS } from "./limits";
+
+export { MAX_SOURCE_BYTES, MAX_SYMBOLS_PER_ANALYSIS };
 const PAGE_SIZE = 1000; // PostgREST returns at most 1000 rows per request
 
 export type AnalysisMetrics = {
