@@ -32,7 +32,7 @@ export async function getSnapshotDetail(
   const [source, files, supported, analysis] = await Promise.all([
     supabase
       .from("repository_snapshot_sources")
-      .select("source_kind, verification, archive_format, archive_sha256, archive_bytes, archive_commit, entries_total, files_accepted, files_skipped, files_skipped_oversized, files_skipped_generated, files_skipped_metadata, created_at")
+      .select("source_kind, verification, archive_format, archive_sha256, archive_bytes, archive_commit, entries_total, files_accepted, files_skipped, files_skipped_oversized, files_skipped_generated, files_skipped_metadata, files_skipped_sensitive, created_at")
       .eq("snapshot_id", snapshot.id)
       .maybeSingle(),
     supabase.from("repository_files").select("id", { count: "exact", head: true }).eq("snapshot_id", snapshot.id),

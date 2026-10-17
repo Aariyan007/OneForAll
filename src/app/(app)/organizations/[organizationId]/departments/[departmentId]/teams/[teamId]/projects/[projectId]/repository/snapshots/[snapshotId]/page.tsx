@@ -180,7 +180,9 @@ export default async function SnapshotPage({
                 icon={<IconFileCode size={16} />}
                 title="Ingestion summary"
                 description="Counted when the archive was processed."
-                actions={<Badge tone="warning">Unverified upload</Badge>}
+                actions={
+                  source.verification === "PROVIDER_FETCHED" ? <Badge tone="success">Fetched from GitHub</Badge> : <Badge tone="warning">Unverified upload</Badge>
+                }
               />
               <div className="flex flex-col gap-4 px-5 py-4">
                 {!completed && (
@@ -199,6 +201,7 @@ export default async function SnapshotPage({
                     { label: "Over the per-file limit", value: count(source.files_skipped_oversized) },
                     { label: "In generated folders", value: count(source.files_skipped_generated) },
                     { label: "Archive metadata", value: count(source.files_skipped_metadata) },
+                    { label: "May contain credentials", value: count(source.files_skipped_sensitive) },
                     { label: "Analysed", value: analysis?.status === "COMPLETED" ? count(analysis.files_analyzed) : <span className="text-fg-3">Unavailable until analysis completes</span> },
                     { label: "Unsupported language", value: analysis?.status === "COMPLETED" ? count(analysis.files_unsupported) : <span className="text-fg-3">Unavailable until analysis completes</span> },
                     { label: "Could not be analysed", value: analysis?.status === "COMPLETED" ? count(analysis.files_failed) : <span className="text-fg-3">Unavailable until analysis completes</span> },
@@ -224,20 +227,35 @@ export default async function SnapshotPage({
                   { label: "Created", value: formatDateTime(snapshot.created_at) },
                   {
                     label: "Source bytes",
-                    value: source ? "Uploaded ZIP archive (unverified)" : manifestFiles > 0 ? "Recorded without a source record" : "None uploaded",
+                    value: source
+                      ? source.source_kind === "GITHUB_ARCHIVE"
+                        ? "Fetched by the server from GitHub for this exact commit"
+                        : "Uploaded ZIP archive (unverified)"
+                      : manifestFiles > 0
+                        ? "Recorded without a source record"
+                        : "None uploaded",
                   },
                   ...(source
                     ? [
-                        { label: "Commit stated by the archive", value: source.archive_commit ? `${source.archive_commit.slice(0, 12)} (matches; self-reported)` : "Not stated by the archive" },
-                        { label: "Archive", value: `${formatBytes(source.archive_bytes)} · uploaded ${formatDateTime(source.created_at)}` },
+                        {
+                          label: "Commit stated by the archive",
+                          value: source.archive_commit
+                            ? `${source.archive_commit.slice(0, 12)} (matches${source.source_kind === "GITHUB_ARCHIVE" ? "" : "; self-reported"})`
+                            : "Not stated by the archive",
+                        },
+                        {
+                          label: "Archive",
+                          value: `${formatBytes(source.archive_bytes)} · ${source.source_kind === "GITHUB_ARCHIVE" ? "fetched" : "uploaded"} ${formatDateTime(source.created_at)}`,
+                        },
                         { label: "Archive SHA-256", value: <span className="break-all font-mono text-[12px]">{source.archive_sha256}</span> },
                       ]
                     : []),
                 ]}
               />
               <p className="t-small mt-3 text-fg-3">
-                The branch and commit are references entered when the snapshot was created. OneForAll has not checked them against the Git host, and an
-                uploaded archive is not proof that its files are what that commit contains.
+                {source?.source_kind === "GITHUB_ARCHIVE"
+                  ? "The commit was resolved on GitHub and its archive downloaded by the server for exactly that commit (github.com is the authority). Files matching the exclusion rules were not recorded."
+                  : "The branch and commit are references entered when the snapshot was created. OneForAll has not checked them against the Git host, and an uploaded archive is not proof that its files are what that commit contains."}
               </p>
             </div>
           </Card>

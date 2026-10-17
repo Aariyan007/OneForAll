@@ -19,6 +19,8 @@ export type SymbolRow = {
   start_column: number;
   end_line: number;
   visibility: string | null;
+  // Total stored relationships touching the symbol (explored views only).
+  degree?: number | null;
 };
 
 export type RelationshipRow = {
@@ -102,6 +104,7 @@ export function buildRepositoryGraph(input: GraphInput): RepositoryGraph {
       endLine: row.end_line + 1,
       visibility: isNonEmpty(row.visibility) ? row.visibility : null,
       signature: isNonEmpty(row.signature) ? row.signature : null,
+      ...(typeof row.degree === "number" && Number.isInteger(row.degree) && row.degree >= 0 ? { degree: row.degree } : {}),
     });
     columns.set(row.id, isLine(row.start_column) ? row.start_column : 0);
   }

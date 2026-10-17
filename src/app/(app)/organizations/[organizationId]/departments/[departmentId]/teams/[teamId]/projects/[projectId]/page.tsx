@@ -14,6 +14,7 @@ import {
   IconListChecks,
   IconLock,
   IconPlus,
+  IconSettings,
 } from "@/components/ui/icons";
 import { PageBody, PageHeader, SectionHeader } from "@/components/ui/page";
 import { StatusBadge } from "@/components/ui/status";
@@ -79,6 +80,10 @@ export default async function ProjectPage({
             <ButtonLink href={`${projectPath}/requirements`} variant="secondary">
               <IconListChecks size={15} />
               Requirements
+            </ButtonLink>
+            <ButtonLink href={`${projectPath}/integrations`} variant="secondary">
+              <IconSettings size={15} />
+              Integrations
             </ButtonLink>
             {canManage && (
               <ButtonLink href={`${projectPath}/requirements/new`} variant="primary">

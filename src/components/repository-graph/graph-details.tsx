@@ -1,7 +1,8 @@
 "use client";
 
 import { Badge } from "@/components/ui/badge";
-import { IconArrowLeft, IconArrowRight, IconFileCode, IconFocus, IconLink, IconSymbol } from "@/components/ui/icons";
+import { Spinner } from "@/components/ui/button";
+import { IconArrowLeft, IconArrowRight, IconFileCode, IconFocus, IconLink, IconNetwork, IconPlus, IconSymbol } from "@/components/ui/icons";
 import type { GraphEdge, GraphNode, RepositoryGraph } from "@/lib/repository-graph/types";
 import { neighbourhood } from "@/lib/repository-graph/view";
 import type { Selection } from "./graph-canvas";
@@ -20,6 +21,10 @@ export function GraphDetails({
   focused,
   onSelect,
   onFocus,
+  degrees,
+  onExpand,
+  onRefocus,
+  busyNodeId = null,
 }: {
   graph: RepositoryGraph;
   nodesById: Map<string, GraphNode>;
@@ -28,6 +33,11 @@ export function GraphDetails({
   focused: boolean;
   onSelect: (selection: Selection) => void;
   onFocus: (nodeId: string | null) => void;
+  // Explored views of large analyses only (see RepositoryGraphExplorer).
+  degrees?: ReadonlyMap<string, { loaded: number; stored: number | null; missing: number }>;
+  onExpand?: (nodeId: string) => void;
+  onRefocus?: (nodeId: string) => void;
+  busyNodeId?: string | null;
 }) {
   if (selection === null) {
     return (
@@ -71,6 +81,8 @@ export function GraphDetails({
   const meta = kindMeta(node.kind);
   const { incoming, outgoing } = neighbourhood(graph, node.id);
   const hidden = !visibleIds.has(node.id);
+  const degree = degrees?.get(node.id);
+  const busy = busyNodeId === node.id;
 
   return (
     <div className="flex flex-col gap-4 px-5 py-4">
@@ -110,6 +122,40 @@ export function GraphDetails({
         <IconFocus size={14} />
         {focused ? "Show full graph" : "Focus on direct neighbours"}
       </button>
+
+      {degree && degree.stored !== null && (
+        <div className="flex flex-col gap-2 rounded-lg border border-border bg-surface-2/50 px-3 py-2.5">
+          <p className="t-small text-fg-2">
+            <span className="tabular-nums text-fg">{degree.loaded}</span> of <span className="tabular-nums text-fg">{degree.stored}</span> stored
+            relationships are in this view
+            {degree.missing > 0 ? <span className="text-warning"> · {degree.missing} not loaded</span> : <span className="text-fg-3"> · complete</span>}
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {onExpand && degree.missing > 0 && (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => onExpand(node.id)}
+                className="inline-flex items-center gap-1.5 rounded-md border border-border-strong bg-surface-2 px-2.5 py-1 text-[12px] font-medium text-fg-2 transition-colors hover:bg-surface-3 hover:text-fg disabled:opacity-60"
+              >
+                {busy ? <Spinner /> : <IconPlus size={13} />}
+                Expand neighbours
+              </button>
+            )}
+            {onRefocus && (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => onRefocus(node.id)}
+                className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1 text-[12px] text-fg-2 transition-colors hover:bg-surface-3 hover:text-fg disabled:opacity-60"
+              >
+                <IconNetwork size={13} />
+                New view from here
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       <EdgeList title="Outgoing" icon={<IconArrowRight size={13} />} edges={outgoing} nodesById={nodesById} side="target" onSelect={onSelect} />
       <EdgeList title="Incoming" icon={<IconArrowLeft size={13} />} edges={incoming} nodesById={nodesById} side="source" onSelect={onSelect} />

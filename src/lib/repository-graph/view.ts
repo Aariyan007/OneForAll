@@ -127,40 +127,58 @@ export function layoutGraph(visible: VisibleGraph): GraphLayout {
   const kidsOf = (id: string) => children.get(id) ?? [];
   const isLeaf = (node: GraphNode) => kidsOf(node.id).length === 0;
 
-  // Subtree size in slots (columns) and rows.
+  // Subtree size in slots (columns) and rows, computed bottom-up WITHOUT recursion: a pre-order walk with an explicit
+  // stack, then the nodes in reverse order (every child is measured before its parent), so containment depth is never
+  // limited by the call stack.
   const sizes = new Map<string, Box>();
-  const remember = (node: GraphNode, box: Box) => {
-    sizes.set(node.id, box);
-    return box;
-  };
-  const measure = (node: GraphNode): Box => {
-    const kids = kidsOf(node.id);
-    if (kids.length === 0) return remember(node, { w: 1, h: 1 });
-    const leaves = kids.filter(isLeaf);
-    const branches = kids.filter((kid) => !isLeaf(kid));
-    const cols = Math.min(LEAF_COLUMNS, leaves.length);
-    let w = cols;
-    let h = cols > 0 ? Math.ceil(leaves.length / cols) : 0;
-    for (const branch of branches) {
-      const box = measure(branch);
-      w += box.w;
-      h = Math.max(h, box.h);
+  const measure = (root: GraphNode): Box => {
+    const order: GraphNode[] = [];
+    const stack: GraphNode[] = [root];
+    while (stack.length > 0) {
+      const node = stack.pop()!;
+      order.push(node);
+      for (const kid of kidsOf(node.id)) stack.push(kid);
     }
-    return remember(node, { w: Math.max(1, w), h: 1 + h });
+    for (let i = order.length - 1; i >= 0; i--) {
+      const node = order[i];
+      const kids = kidsOf(node.id);
+      if (kids.length === 0) {
+        sizes.set(node.id, { w: 1, h: 1 });
+        continue;
+      }
+      const leaves = kids.filter(isLeaf);
+      const cols = Math.min(LEAF_COLUMNS, leaves.length);
+      let w = cols;
+      let h = cols > 0 ? Math.ceil(leaves.length / cols) : 0;
+      for (const branch of kids) {
+        if (isLeaf(branch)) continue;
+        const box = sizes.get(branch.id)!;
+        w += box.w;
+        h = Math.max(h, box.h);
+      }
+      sizes.set(node.id, { w: Math.max(1, w), h: 1 + h });
+    }
+    return sizes.get(root.id)!;
   };
 
+  // Positions, again with an explicit stack instead of recursion.
   const local: PositionedNode[] = [];
-  const place = (node: GraphNode, col: number, row: number) => {
-    const box = sizes.get(node.id) ?? { w: 1, h: 1 }; // leaves are never measured: one slot
-    local.push({ ...node, x: (col + (box.w - 1) / 2) * SLOT_X, y: row * SLOT_Y });
-    const kids = kidsOf(node.id);
-    const leaves = kids.filter(isLeaf);
-    const cols = Math.min(LEAF_COLUMNS, leaves.length);
-    leaves.forEach((leaf, i) => place(leaf, col + (i % cols), row + 1 + Math.floor(i / cols)));
-    let next = col + cols;
-    for (const branch of kids.filter((kid) => !isLeaf(kid))) {
-      place(branch, next, row + 1);
-      next += sizes.get(branch.id)!.w;
+  const place = (root: GraphNode, rootCol: number, rootRow: number) => {
+    const stack: { node: GraphNode; col: number; row: number }[] = [{ node: root, col: rootCol, row: rootRow }];
+    while (stack.length > 0) {
+      const { node, col, row } = stack.pop()!;
+      const box = sizes.get(node.id) ?? { w: 1, h: 1 };
+      local.push({ ...node, x: (col + (box.w - 1) / 2) * SLOT_X, y: row * SLOT_Y });
+      const kids = kidsOf(node.id);
+      const leaves = kids.filter(isLeaf);
+      const cols = Math.min(LEAF_COLUMNS, leaves.length);
+      leaves.forEach((leaf, i) => stack.push({ node: leaf, col: col + (i % cols), row: row + 1 + Math.floor(i / cols) }));
+      let next = col + cols;
+      for (const branch of kids) {
+        if (isLeaf(branch)) continue;
+        stack.push({ node: branch, col: next, row: row + 1 });
+        next += sizes.get(branch.id)!.w;
+      }
     }
   };
 
@@ -190,7 +208,8 @@ export function layoutGraph(visible: VisibleGraph): GraphLayout {
   }
 
   const area = groups.reduce((sum, g) => sum + (g.width + FILE_GAP) * (g.height + FILE_GAP), 0);
-  const rowLimit = Math.max(...groups.map((g) => g.width), Math.sqrt(area * TARGET_ASPECT));
+  let rowLimit = Math.sqrt(area * TARGET_ASPECT);
+  for (const group of groups) rowLimit = Math.max(rowLimit, group.width); // no argument spread over unbounded arrays
   const positioned: PositionedNode[] = [];
   const files: FileGroup[] = [];
   let x = 0;

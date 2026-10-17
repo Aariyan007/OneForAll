@@ -4,14 +4,14 @@ import { createHmac } from "node:crypto";
 // secret of its own): the key is passed in by the caller, which reads the server-only STRUCTURE_PERSIST_KEY (the same
 // key that signs structure; the version line keeps the two kinds of message apart). The database verifies the same
 // message with the key held in Supabase Vault (private.manifest_canonical + persist_snapshot_manifest, migration
-// 20261018000001), so both sides MUST stay identical. A fixed test vector in
+// 20261018000001; version 2 since 20261021000001), so both sides MUST stay identical. A fixed test vector in
 // supabase/tests/repository_manifest_lifecycle_rls.sql keeps them in agreement.
 //
-// CANONICAL MESSAGE, version 1 (UTF-8, every line ends with LF):
-//   OFA-MANIFEST-V1
+// CANONICAL MESSAGE, version 2 (UTF-8, every line ends with LF):
+//   OFA-MANIFEST-V2
 //   <snapshot_id, lowercase uuid>
 //   <run_token, 64 lowercase hex>
-//   SRC|<source_kind>|<archive_format>|<archive_sha256>|<archive_bytes>|<archive_commit or ->|<entries_total>|<files_accepted>|<files_skipped>|<files_skipped_oversized>|<files_skipped_generated>|<files_skipped_metadata>
+//   SRC|<source_kind>|<archive_format>|<archive_sha256>|<archive_bytes>|<archive_commit or ->|<entries_total>|<files_accepted>|<files_skipped>|<files_skipped_oversized>|<files_skipped_generated>|<files_skipped_metadata>|<files_skipped_sensitive or ->
 //   <number of files>
 //   one line per file, in array order:
 //     F|<S path>|<S language>|<size_bytes>|<content_hash>
@@ -20,7 +20,8 @@ import { createHmac } from "node:crypto";
 
 // Field names match the database payload (p_source / p_files) exactly.
 export type ManifestSource = {
-  source_kind: "UPLOADED_ARCHIVE";
+  // UPLOADED_ARCHIVE: a ZIP uploaded by a user. GITHUB_ARCHIVE: fetched by the server from GitHub for an exact commit.
+  source_kind: "UPLOADED_ARCHIVE" | "GITHUB_ARCHIVE";
   archive_format: "ZIP";
   archive_sha256: string;
   archive_bytes: number;
@@ -31,6 +32,7 @@ export type ManifestSource = {
   files_skipped_oversized: number;
   files_skipped_generated: number;
   files_skipped_metadata: number;
+  files_skipped_sensitive: number;
 };
 
 export type ManifestFile = { path: string; language: string | null; size_bytes: number; content_hash: string };
@@ -49,12 +51,12 @@ function lengthPrefixed(value: string | null): string {
 export function canonicalManifest(input: ManifestSigningInput): string {
   const s = input.source;
   const lines = [
-    "OFA-MANIFEST-V1",
+    "OFA-MANIFEST-V2",
     input.snapshotId.toLowerCase(),
     input.runToken,
     `SRC|${s.source_kind}|${s.archive_format}|${s.archive_sha256}|${s.archive_bytes}|${s.archive_commit ?? "-"}` +
       `|${s.entries_total}|${s.files_accepted}|${s.files_skipped}` +
-      `|${s.files_skipped_oversized}|${s.files_skipped_generated}|${s.files_skipped_metadata}`,
+      `|${s.files_skipped_oversized}|${s.files_skipped_generated}|${s.files_skipped_metadata}|${s.files_skipped_sensitive}`,
     String(input.files.length),
     ...input.files.map((f) => `F|${lengthPrefixed(f.path)}|${lengthPrefixed(f.language)}|${f.size_bytes}|${f.content_hash}`),
   ];

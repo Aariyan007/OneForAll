@@ -102,6 +102,13 @@ begin
     ('path in node_modules',                public.zz_vsrc(1), jsonb_build_array(public.zz_vf('{"path":"pkg/node_modules/x.js"}')), true, '23514'),
     ('path in .git',                        public.zz_vsrc(1), jsonb_build_array(public.zz_vf('{"path":".git/config"}')), true, '23514'),
     ('path in __MACOSX',                    public.zz_vsrc(1), jsonb_build_array(public.zz_vf('{"path":"__MACOSX/._a.ts"}')), true, '23514'),
+    ('sensitive: .env',                     public.zz_vsrc(1), jsonb_build_array(public.zz_vf('{"path":"config/.env","language":null}')), true, '23514'),
+    ('sensitive: .env.production',          public.zz_vsrc(1), jsonb_build_array(public.zz_vf('{"path":".env.production","language":null}')), true, '23514'),
+    ('sensitive: private key',              public.zz_vsrc(1), jsonb_build_array(public.zz_vf('{"path":"certs/server.PEM","language":null}')), true, '23514'),
+    ('sensitive: ssh key',                  public.zz_vsrc(1), jsonb_build_array(public.zz_vf('{"path":"deploy/id_ed25519","language":null}')), true, '23514'),
+    ('sensitive: .npmrc',                   public.zz_vsrc(1), jsonb_build_array(public.zz_vf('{"path":".npmrc","language":null}')), true, '23514'),
+    ('sensitive count negative',            public.zz_vsrc(1) || '{"files_skipped_sensitive":-1}', jsonb_build_array(public.zz_vf()), true, '22023'),
+    ('unknown source kind',                 public.zz_vsrc(1) || '{"source_kind":"GITLAB_ARCHIVE"}', jsonb_build_array(public.zz_vf()), true, '23514'),
     ('language with newline',               public.zz_vsrc(1), jsonb_build_array(public.zz_vf(jsonb_build_object('language', E'Type\nScript'))), true, '22023'),
     ('language as JSON number',             public.zz_vsrc(1), jsonb_build_array(public.zz_vf('{"language":5}')), true, '22023'),
     ('language empty',                      public.zz_vsrc(1), jsonb_build_array(public.zz_vf('{"language":""}')), true, '22023'),
@@ -155,6 +162,32 @@ begin
                       public.zz_vf('{"path":"node_modules","language":null}'), public.zz_vf('{"path":"docs/build.md","language":"Markdown","size_bytes":0}'))));
   assert r.status = 'COMPLETED' and r.files_count = 6, 'valid values (C++, C#, null language, NFD path, a FILE named node_modules, build.md) are accepted';
   s_done := s;
+  reset role;
+
+  ---------------------------------------------------------------- manifest V2: sensitive count, env templates, GitHub source kind
+  insert into public.repository_snapshots (repository_id, commit_sha, branch) values (repo, repeat('7', 40), 'main') returning id into s;
+  set local role authenticated;
+  perform set_config('request.jwt.claims', json_build_object('sub', owner1, 'role', 'authenticated')::text, true);
+  select run_token into tok from public.begin_snapshot_ingestion(s);
+  select * into r from public.persist_snapshot_manifest(s, tok,
+    public.zz_vsrc(2) || '{"source_kind":"GITHUB_ARCHIVE","files_skipped":5,"files_skipped_sensitive":2,"entries_total":7}',
+    jsonb_build_array(public.zz_vf('{"path":".env.example","language":null}'), public.zz_vf('{"path":"src/keyboard.ts"}')),
+    public.zz_vsig(s, tok, public.zz_vsrc(2) || '{"source_kind":"GITHUB_ARCHIVE","files_skipped":5,"files_skipped_sensitive":2,"entries_total":7}',
+      jsonb_build_array(public.zz_vf('{"path":".env.example","language":null}'), public.zz_vf('{"path":"src/keyboard.ts"}'))));
+  assert r.status = 'COMPLETED', 'env templates and look-alike names are not treated as sensitive';
+  reset role;
+  select * into r from public.repository_snapshot_sources where snapshot_id = s;
+  assert r.source_kind = 'GITHUB_ARCHIVE' and r.verification = 'PROVIDER_FETCHED' and r.files_skipped_sensitive = 2, 'GitHub source recorded as PROVIDER_FETCHED with its sensitive count';
+  set local role authenticated;
+  perform set_config('request.jwt.claims', json_build_object('sub', owner1, 'role', 'authenticated')::text, true);
+  insert into public.repository_snapshots (repository_id, commit_sha, branch) values (repo, repeat('8', 40), 'main') returning id into s;
+  select run_token into tok from public.begin_snapshot_ingestion(s);
+  st := null;
+  begin
+    perform public.persist_snapshot_manifest(s, tok, public.zz_vsrc(1) || '{"files_skipped_sensitive":1}', jsonb_build_array(public.zz_vf()),
+      public.zz_vsig(s, tok, public.zz_vsrc(1) || '{"files_skipped_sensitive":1}', jsonb_build_array(public.zz_vf())));
+  exception when others then st := sqlstate; end;
+  assert st = '23514', 'the sensitive count must add up with the other exclusions to files_skipped';
   reset role;
 
   ---------------------------------------------------------------- the COMPLETED-manifest seal: ordinary deletes vs cascades

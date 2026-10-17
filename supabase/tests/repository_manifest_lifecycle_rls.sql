@@ -129,22 +129,22 @@ begin
   end loop;
 
   ---------------------------------------------------------------- canonical form and HMAC agree with Node (fixed vector)
-  -- Computed with canonicalManifest/signManifest (src/server/repository-files/signing.ts) for exactly this input.
+  -- Computed with canonicalManifest/signManifest (src/server/repository-files/signing.ts, format V2) for exactly this input.
   vec_source := jsonb_build_object('source_kind', 'UPLOADED_ARCHIVE', 'archive_format', 'ZIP', 'archive_sha256', repeat('c', 64),
     'archive_bytes', 9999999999, 'archive_commit', null, 'entries_total', 7, 'files_accepted', 3, 'files_skipped', 3,
-    'files_skipped_oversized', 1, 'files_skipped_generated', 2, 'files_skipped_metadata', 0);
+    'files_skipped_oversized', 1, 'files_skipped_generated', 2, 'files_skipped_metadata', 0, 'files_skipped_sensitive', 0);
   vec_files := jsonb_build_array(
     public.zz_file('src/a|b.ts', repeat('1', 64), 'TypeScript', 10),
     public.zz_file(E'ünïcode/файл.ts', repeat('2', 64), null, 0),
     public.zz_file('README.md', repeat('3', 64), 'Markdown', 9999999999));
-  vec_expected := E'OFA-MANIFEST-V1\n11111111-2222-3333-4444-555555555555\n' || repeat('ab', 32) || E'\n'
-    || 'SRC|UPLOADED_ARCHIVE|ZIP|' || repeat('c', 64) || E'|9999999999|-|7|3|3|1|2|0\n3\n'
+  vec_expected := E'OFA-MANIFEST-V2\n11111111-2222-3333-4444-555555555555\n' || repeat('ab', 32) || E'\n'
+    || 'SRC|UPLOADED_ARCHIVE|ZIP|' || repeat('c', 64) || E'|9999999999|-|7|3|3|1|2|0|0\n3\n'
     || 'F|10:src/a|b.ts|10:TypeScript|10|' || repeat('1', 64) || E'\n'
     || E'F|21:ünïcode/файл.ts|-|0|' || repeat('2', 64) || E'\n'
     || 'F|9:README.md|8:Markdown|9999999999|' || repeat('3', 64) || E'\n';
   assert private.manifest_canonical('11111111-2222-3333-4444-555555555555', repeat('ab', 32), vec_source, vec_files) = vec_expected,
     'database canonical manifest equals the Node canonical manifest';
-  assert private.structure_hmac(vec_expected, 'manifest-vector-key-0123456789abcdefgh') = '779b5d6760584c37af01a4692644c6d7c087bc03ef5e1e939814f6845fbee59b',
+  assert private.structure_hmac(vec_expected, 'manifest-vector-key-0123456789abcdefgh') = 'd3a4a06f379317ea5b01878ead4f1ce7c81856ad345e2ccf152bfa4e61423984',
     'database HMAC-SHA256 of the manifest equals the Node signature';
   assert private.manifest_canonical('11111111-2222-3333-4444-555555555555', repeat('ab', 32), vec_source, vec_files)
       <> private.manifest_canonical('11111111-2222-3333-4444-555555555556', repeat('ab', 32), vec_source, vec_files), 'the snapshot id is part of the message';

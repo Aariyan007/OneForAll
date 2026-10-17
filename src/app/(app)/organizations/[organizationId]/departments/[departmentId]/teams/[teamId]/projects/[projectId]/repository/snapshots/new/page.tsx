@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { CreateSnapshotForm } from "@/components/repository-snapshots/create-snapshot-form";
 import { Alert } from "@/components/ui/alert";
@@ -33,7 +34,14 @@ export default async function NewSnapshotPage({
         description={`Record ${repository.owner} / ${repository.name} at a specific commit.`}
       />
       <div className="flex flex-col gap-4">
-        <Alert tone="info">This records a reference to a branch and commit. It does not download any code: OneForAll does not fetch repositories from GitHub or GitLab. After creating it you upload a ZIP of that commit on the snapshot page, which records the files and analyses their structure.</Alert>
+        <Alert tone="info">
+          This records a reference to a branch and commit and does not download any code; you then upload a ZIP of that commit on the snapshot page. For a
+          GitHub repository, the import on the{" "}
+          <Link href={`${projectPath}/integrations`} className="underline underline-offset-2">
+            Integrations
+          </Link>{" "}
+          page fetches the exact commit for you instead.
+        </Alert>
         <Card>
           <CardHeader icon={<IconCommit size={16} />} title="Snapshot details" />
           <div className="px-5 py-5">

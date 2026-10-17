@@ -1,11 +1,17 @@
-# Repository source ingestion (uploaded ZIP archives)
+# Repository source ingestion
 
-A snapshot starts as a record of a commit (`PENDING`, no files). An OWNER or ADMIN then uploads a ZIP of that
-commit. OneForAll validates the archive, records the file manifest, seals the snapshot (`COMPLETED`) and runs the
-existing structure analysis. Repository Intelligence and the Repository Graph then show the result.
+A snapshot starts as a record of a commit (`PENDING`, no files). Source then enters in one of two ways, and both
+use the same validation, exclusion, signing and analysis pipeline:
 
-This is the only way source enters OneForAll today. **There is no GitHub or GitLab download, OAuth, token, webhook,
-queue or worker.**
+- **Uploaded ZIP** (this page, below). An OWNER or ADMIN uploads a ZIP of the commit. The source is `UNVERIFIED`.
+- **GitHub import** (Project → Integrations, see [integrations.md](integrations.md)). The server resolves a branch to
+  an exact commit on GitHub, downloads that commit's archive and ingests it. The source is `PROVIDER_FETCHED`.
+
+OneForAll validates the archive, records the file manifest, seals the snapshot (`COMPLETED`) and runs the existing
+structure analysis. Repository Intelligence and the Repository Graph then show the result.
+
+There is no GitLab or Bitbucket download, no OAuth app, no webhook, no queue and no worker. The ZIP upload stays
+available as the fallback for every repository.
 
 ## Workflow
 1. **Projects → Repository Intelligence → Create snapshot.** Enter the full commit SHA and the branch. You land on the new snapshot's page.
@@ -74,9 +80,12 @@ Every file in the archive is either recorded in the manifest or excluded in exac
 | --- | --- | --- |
 | Archive metadata | `__MACOSX/` | `files_skipped_metadata` |
 | Generated folders | inside `node_modules`, `.git`, `dist`, `build`, `.next` or `coverage`; takes precedence over size | `files_skipped_generated` |
+| May contain credentials | file name `.env` or `.env.*` (except `.env.example`, `.env.sample`, `.env.template`, `.env.dist`), `.npmrc`, `.pypirc`, `.netrc`, `.git-credentials`, `.htpasswd`, `id_rsa`, `id_dsa`, `id_ecdsa`, `id_ed25519`, or extension `.pem`, `.key`, `.p12`, `.pfx`, `.jks`, `.keystore` (case-insensitive) | `files_skipped_sensitive` (migration `20261021000001`) |
 | Over the per-file limit | larger than 2 MiB | `files_skipped_oversized` |
 
-- Rows written before migration `20261017000001` have no breakdown; the page shows "Not recorded", never zero.
+- Each file gets exactly one category, in this order: metadata, generated folder, may contain credentials, over the limit.
+- "May contain credentials" is a file-name safety net, **not secret scanning**. Such files are never recorded, hashed or parsed (a hash of a short secret could be guessed offline). A secret inside an ordinary source file is still recorded as that file's hash and parsed for symbols; the graph shows symbol names and file paths, never file contents.
+- Rows written before migration `20261017000001` have no breakdown; the page shows "Not recorded", never zero. Rows written before `20261021000001` have no credentials count (`NULL`, shown as "Not recorded").
 - Unsupported languages are not excluded: those files are recorded, and the analysis counts them as unsupported. Likewise, files the analysis could not parse are counted by the analysis, not the upload.
 - Those analysis counts exist only once the analysis has completed; until then the page says they are unavailable.
 - The Repository Graph covers only recorded files that were analysed.
@@ -93,15 +102,19 @@ The reader is `src/server/repository-sources/zip.ts`, built on Node's `zlib` wit
 - **Unsafe paths reject the archive:** every path goes through the manifest's `normalizeRepositoryPath`, so absolute, drive-letter, `..`, backslash traversal, control characters and null bytes are all rejected. C1 control characters (U+0080–U+009F) are rejected as well: the normalizer allows them but the database path `CHECK` does not.
 - **Collisions reject the archive:** duplicate, Unicode-normalization (NFC) and case-insensitive collisions, and a path that is both a file and a folder.
 - **One top-level folder is stripped:** a single shared top-level folder (for example `repo-<sha>/`) is treated as the repository root, unless it is an ignored folder. This is a heuristic. A repository whose only top-level entry really is one folder (say, just `src/`) is recorded without that folder in its paths.
-- **Skipped, not recorded:** `__MACOSX/` metadata and the manifest's ignored folders (`node_modules`, `.git`, `dist`, `build`, `.next`, `coverage`).
+- **Skipped, not recorded:** `__MACOSX/` metadata, the manifest's ignored folders (`node_modules`, `.git`, `dist`, `build`, `.next`, `coverage`) and files that may contain credentials (table above).
 
 ## Hashes and source verification
 - **Manifest:** each recorded file stores its normalized path, its language (from the extension), its byte size and the SHA-256 of its exact bytes. This uses the existing `prepareManifest`; the content itself is never stored.
 - **Before parsing:** the source provider (`src/server/repository-sources/provider.ts`) returns only manifest rows of this snapshot, and only bytes whose size and SHA-256 match. The analyzer then checks the content against the manifest again.
-- **Verification:**
-  - An uploaded archive is not proof of what the commit contains. `repository_snapshot_sources.verification` is always `UNVERIFIED`; clients cannot write that column, and the database allows no other value.
-  - `archive_commit` records the commit the archive **claims** (the ZIP comment that `git archive` and Git hosts write). It is shown as "self-reported".
-  - A future provider-based ingestion can add new `source_kind` and `verification` values in a later additive migration.
+- **Verification:** the database sets `repository_snapshot_sources.verification` from `source_kind` with a trigger (migration `20261021000001`); no caller chooses it.
+
+  | `source_kind` | `verification` | Meaning |
+  | --- | --- | --- |
+  | `UPLOADED_ARCHIVE` | `UNVERIFIED` | An uploaded archive is not proof of what the commit contains. `archive_commit` is the commit the archive **claims** (its ZIP comment) and is shown as "self-reported". |
+  | `GITHUB_ARCHIVE` | `PROVIDER_FETCHED` | The server resolved the commit on GitHub, checked it is on the chosen branch, and downloaded `GET /repos/{owner}/{repo}/zipball/{sha}` for that exact SHA. An archive comment that states a different commit is rejected, as for uploads (GitHub writes the commit SHA there). github.com is the authority; OneForAll does not re-hash the Git tree. |
+
+  `source_kind` is part of the signed manifest, so a caller cannot relabel an upload as provider-fetched without the server key.
 
 ## Storage, retention and cleanup
 - The archive and the accepted files exist **only in the memory of the upload request**. Nothing is written to disk, so there is no extraction directory and no path can escape one.
@@ -128,10 +141,10 @@ The reader is `src/server/repository-sources/zip.ts`, built on Node's `zlib` wit
   | `fail_snapshot_ingestion(id, token, message)` | `PROCESSING` → `FAILED` | the current run token |
   | `fail_stale_snapshot_ingestion(id)` | `PROCESSING` → `FAILED` | processing started at least 10 minutes ago |
 
-- **Signed manifests.** The signature is HMAC-SHA256 over a canonical message (`OFA-MANIFEST-V1`, defined in `src/server/repository-files/signing.ts` and `private.manifest_canonical()`; a fixed test vector keeps them identical). It uses the existing server-only key of Phase 2H structure persistence (`STRUCTURE_PERSIST_KEY`, Vault secret `structure_persist_key`); the version line keeps manifest and structure signatures apart. An OWNER/ADMIN can call the functions directly but cannot produce a signature the database accepts, so cannot forge, alter, re-target or replay a manifest, or complete a snapshot without one. Run tokens live in `private.snapshot_ingestion_runs` (not exposed to any client) and exist only while a snapshot is `PROCESSING`.
-- **Payload validation** (migration `20261019000001`, `private.manifest_payload_check`). Even a correctly signed payload must have exactly the expected keys and JSON types, plain integers within range, a language name (letters, digits, `+`, `#`) or null, no NFC-equivalent or case-insensitive duplicate paths, and no path inside an excluded folder or `__MACOSX/` (mirrors `IGNORED_DIRECTORIES` and the archive reader: change both together). A signature that is not 64 lowercase hex characters is rejected up front (`22023`). The HMAC is compared on raw bytes as a double HMAC, because pgcrypto has no constant-time comparison.
+- **Signed manifests.** The signature is HMAC-SHA256 over a canonical message (`OFA-MANIFEST-V2` since migration `20261021000001`, which added the GitHub source kind and the credentials count to the source line; defined in `src/server/repository-files/signing.ts` and `private.manifest_canonical()`; a fixed test vector keeps them identical). It uses the existing server-only key of Phase 2H structure persistence (`STRUCTURE_PERSIST_KEY`, Vault secret `structure_persist_key`); the version line keeps manifest and structure signatures apart. An OWNER/ADMIN can call the functions directly but cannot produce a signature the database accepts, so cannot forge, alter, re-target or replay a manifest, or complete a snapshot without one. Run tokens live in `private.snapshot_ingestion_runs` (not exposed to any client) and exist only while a snapshot is `PROCESSING`.
+- **Payload validation** (migration `20261019000001`, `private.manifest_payload_check`). Even a correctly signed payload must have exactly the expected keys and JSON types, plain integers within range, a language name (letters, digits, `+`, `#`) or null, no NFC-equivalent or case-insensitive duplicate paths, no path inside an excluded folder or `__MACOSX/`, and no file name from the "may contain credentials" list (mirrors `IGNORED_DIRECTORIES`, `isSensitivePath` and the archive reader: change both together). A signature that is not 64 lowercase hex characters is rejected up front (`22023`). The HMAC is compared on raw bytes as a double HMAC, because pgcrypto has no constant-time comparison.
 - **Sealed manifests.** A trigger refuses every UPDATE of a manifest row, and every INSERT into or DELETE from the manifest of a COMPLETED snapshot, whoever the writer is. Deleting the snapshot (or anything above it) still cascades.
-- `repository_snapshot_sources` (migration `20261016000001`): visible exactly when its snapshot is visible; written only by `persist_snapshot_manifest` (uploader = the caller, verification always `UNVERIFIED`); never updatable.
+- `repository_snapshot_sources` (migration `20261016000001`): visible exactly when its snapshot is visible; written only by `persist_snapshot_manifest` (uploader = the caller, verification set by the trigger from `source_kind`); never updatable.
 - No service role is used.
 - Structure is still written only through the signed (HMAC-SHA256) persistence and run token of Phase 2H.
 - Errors shown to users are generic, with no internal paths or database messages. Source code, run tokens and keys are never sent to the browser or logged.
@@ -146,16 +159,18 @@ writes are now denied; see `supabase/tests/repository_manifest_lifecycle_rls.sql
 - Because the archive is not stored, re-running a FAILED analysis needs the same archive uploaded again.
 
 ## Not supported yet
-- Automatic GitHub/GitLab ingestion, private repositories, OAuth and access tokens
+- GitLab, Bitbucket and GitHub Enterprise Server ingestion; GitHub App or OAuth sign-in (GitHub uses an optional fine-grained token, see [integrations.md](integrations.md))
+- Private GitHub repositories are implemented but **not yet tested against a real private repository**
 - Webhooks and scheduled re-ingestion
 - Formats other than ZIP (tar, tar.gz, 7z, rar)
-- Commit verification against a Git host
+- Verifying an uploaded archive against a Git host
 
 ## Tests
 - **Unit tests:**
   - `src/server/repository-sources/sources.test.ts`: archives built in memory, covering boundaries, adversarial input and exclusion accounting.
   - `src/lib/repository-sources/upload.test.ts`: form and server selection rules, and limit consistency.
-  Both use `node:test`. Run either file:
+  - `src/server/integrations/integrations.test.ts`: GitHub and Jira clients, SSRF guards and credential encryption, with mocked `fetch` and DNS (not real provider tests).
+  All use `node:test`. Run either file:
   ```bash
   npx tsc src/server/repository-sources/sources.test.ts --outDir <tmp-dir> --module commonjs --target es2022 --moduleResolution node --skipLibCheck --strict --esModuleInterop --types node
   ```
@@ -165,7 +180,8 @@ writes are now denied; see `supabase/tests/repository_manifest_lifecycle_rls.sql
 - **Database:** one transaction each, rolled back.
   - `supabase/tests/repository_manifest_lifecycle_rls.sql`: grants and functions, the Node/database signature vector, OWNER/ADMIN ingestion, MEMBER and cross-tenant denial, denial of direct Data API writes, empty or incomplete manifests, forged/tampered/re-targeted/replayed manifests and run tokens, sealed COMPLETED manifests, failure and retry, stale recovery, the one-COMPLETED-per-commit race, and structure analysis and reads afterwards. It signs with the key already in Vault (read only inside the database, never changed) and adds a test key, inside the transaction, only when Vault has none.
   - `supabase/tests/repository_manifest_validation_rls.sql`: signed but malformed payloads, signature format, helper privileges, TRUNCATE, and the seal under ordinary deletes and cascades.
-  - `supabase/tests/repository_snapshot_sources_rls.sql`: source-record visibility, denial of every direct write, and the table rules.
+  - `supabase/tests/repository_snapshot_sources_rls.sql`: source-record visibility, denial of every direct write, and the table rules (including the verification trigger).
+  - `supabase/tests/project_integrations_rls.sql`: integration settings, stored ciphertext and the Jira issue mirror.
   Run either:
   ```bash
   docker exec -i supabase_db_OneForAll psql -U postgres -v ON_ERROR_STOP=1 < supabase/tests/repository_snapshot_sources_rls.sql

@@ -56,12 +56,14 @@ export function GraphCanvas({
   edges,
   selection,
   related,
+  pending,
   onSelect,
 }: {
   layout: GraphLayout;
   edges: GraphEdge[];
   selection: Selection;
   related: ReadonlySet<string> | null; // nodes to keep fully visible while something is selected
+  pending?: ReadonlyMap<string, number>; // explored views: stored relationships of a node that are not loaded
   onSelect: (selection: Selection) => void;
 }) {
   const box = useRef<HTMLDivElement>(null);
@@ -203,7 +205,7 @@ export function GraphCanvas({
             </g>
           ))}
           <EdgeLayer edges={edges} byId={byId} selection={selection} onSelect={onSelect} />
-          <NodeLayer nodes={layout.nodes} selection={selection} related={related} onSelect={onSelect} />
+          <NodeLayer nodes={layout.nodes} selection={selection} related={related} pending={pending} onSelect={onSelect} />
         </g>
       </svg>
       <div className="absolute right-3 bottom-3 flex flex-col overflow-hidden rounded-lg border border-border-strong bg-surface-2 shadow-2">
@@ -303,11 +305,13 @@ const NodeLayer = memo(function NodeLayer({
   nodes,
   selection,
   related,
+  pending,
   onSelect,
 }: {
   nodes: PositionedNode[];
   selection: Selection;
   related: ReadonlySet<string> | null;
+  pending?: ReadonlyMap<string, number>;
   onSelect: (selection: Selection) => void;
 }) {
   return (
@@ -317,6 +321,7 @@ const NodeLayer = memo(function NodeLayer({
         const selected = selection?.type === "node" && selection.id === node.id;
         const dim = related !== null && !related.has(node.id);
         const glyphWidth = Math.max(22, meta.glyph.length * 7 + 10);
+        const notLoaded = pending?.get(node.id) ?? 0;
         return (
           <g
             key={node.id}
@@ -325,7 +330,7 @@ const NodeLayer = memo(function NodeLayer({
             role="button"
             tabIndex={0}
             aria-pressed={selected}
-            aria-label={`${meta.label} ${node.label}${node.qualifiedName ? `, ${node.qualifiedName}` : ""}, ${node.filePath} line ${node.startLine}`}
+            aria-label={`${meta.label} ${node.label}${node.qualifiedName ? `, ${node.qualifiedName}` : ""}, ${node.filePath} line ${node.startLine}${notLoaded > 0 ? `, ${notLoaded} relationships not loaded` : ""}`}
             className="group cursor-pointer outline-none"
             opacity={dim ? 0.3 : 1}
             onClick={() => onSelect({ type: "node", id: node.id })}
@@ -363,6 +368,14 @@ const NodeLayer = memo(function NodeLayer({
             <text x={glyphWidth + 16} y={35} fontSize={10.5} style={{ fill: "var(--fg-3)" }}>
               {`${meta.label} · L${node.startLine}`}
             </text>
+            {notLoaded > 0 && (
+              <g transform={`translate(${NODE_WIDTH - 30},-8)`} aria-hidden="true">
+                <rect width={34} height={16} rx={8} style={{ fill: "var(--bg)", stroke: "var(--warning)" }} strokeWidth={1} />
+                <text x={17} y={11.5} textAnchor="middle" fontSize={10} fontWeight={600} style={{ fill: "var(--warning)" }}>
+                  {`+${notLoaded > 99 ? "99" : notLoaded}`}
+                </text>
+              </g>
+            )}
           </g>
         );
       })}

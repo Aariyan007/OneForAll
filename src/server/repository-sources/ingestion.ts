@@ -97,7 +97,19 @@ async function loadRecordedManifest(snapshotId: string): Promise<SourceFile[]> {
   }
 }
 
+// An archive fetched by the server itself (GitHub import): the bytes plus where they came from. It goes through exactly
+// the same reader, limits, exclusions, signing and persistence as an upload.
+export type FetchedArchive = { kind: "GITHUB_ARCHIVE"; bytes: Buffer };
+
+function isFetchedArchive(value: unknown): value is FetchedArchive {
+  return typeof value === "object" && value !== null && (value as FetchedArchive).kind === "GITHUB_ARCHIVE" && Buffer.isBuffer((value as FetchedArchive).bytes);
+}
+
 async function readUpload(upload: unknown): Promise<SourceArchive> {
+  if (isFetchedArchive(upload)) {
+    if (upload.bytes.length > ARCHIVE_LIMITS.maxUploadBytes) throw new ArchiveError("The repository archive is larger than the size limit.");
+    return readSourceArchive(upload.bytes, ARCHIVE_LIMITS);
+  }
   if (!(upload instanceof File)) throw new ArchiveError("Choose a .zip archive to upload.");
   // Same rules (and messages) as the form; here they are authoritative. The declared size is only a first check: the
   // reader checks the real byte count again.
@@ -119,6 +131,7 @@ async function analyse(snapshotId: string, repositoryId: string, archive: Source
 }
 
 export async function ingestSnapshotArchive(repositoryId: string, snapshotId: string, upload: unknown): Promise<IngestionResult> {
+  const sourceKind = isFetchedArchive(upload) ? upload.kind : "UPLOADED_ARCHIVE";
   const snapshot = await readSnapshot(snapshotId, repositoryId);
   if (!snapshot) return { ok: false, error: PERMISSION_MESSAGE };
   if (snapshot.status === "PROCESSING") return { ok: false, error: BUSY_MESSAGE };
@@ -183,7 +196,7 @@ export async function ingestSnapshotArchive(repositoryId: string, snapshotId: st
       snapshot.id,
       begun.runToken,
       {
-        source_kind: "UPLOADED_ARCHIVE",
+        source_kind: sourceKind,
         archive_format: "ZIP",
         archive_sha256: archive.archiveSha256,
         archive_bytes: archive.archiveBytes,
@@ -193,6 +206,7 @@ export async function ingestSnapshotArchive(repositoryId: string, snapshotId: st
         files_skipped_oversized: exclusions.oversized,
         files_skipped_generated: exclusions.generated,
         files_skipped_metadata: exclusions.metadata,
+        files_skipped_sensitive: exclusions.sensitive,
       },
       archive.manifest.map((entry) => ({ path: entry.path, sizeBytes: entry.sizeBytes, contentHash: entry.contentHash })),
     );
@@ -217,6 +231,7 @@ function summarize(archive: SourceArchive): string {
   if (counts.oversized) left.push(`${counts.oversized} over the per-file size limit`);
   if (counts.generated) left.push(`${counts.generated} in generated or dependency folders`);
   if (counts.metadata) left.push(`${counts.metadata} archive metadata`);
+  if (counts.sensitive) left.push(`${counts.sensitive} that may contain credentials`);
   if (left.length > 0) parts.push(`Not recorded: ${left.join(", ")}.`);
   const big = archive.skipped.filter((s) => s.category === "oversized").map((s) => s.path);
   if (big.length > 0) parts.push(`Too large: ${big.slice(0, 10).join(", ")}${big.length > 10 ? ` and ${big.length - 10} more` : ""}.`);

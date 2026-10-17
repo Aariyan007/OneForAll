@@ -78,12 +78,24 @@ begin
   select count(*) into n from public.repository_snapshot_sources where snapshot_id in (s_a, s_done, s_x); assert n = 1, 'no denied write changed the source records';
 
   ---------------------------------------------------------------- table rules (hold for every writer, including the persistence function)
+  -- verification is derived from the (signed) source kind by a trigger (migration 20261021000001): whatever a writer
+  -- passes, an uploaded archive is recorded as UNVERIFIED and a server-fetched GitHub archive as PROVIDER_FETCHED.
+  insert into public.repository_snapshot_sources (snapshot_id,source_kind,archive_format,archive_sha256,archive_bytes,entries_total,files_accepted,files_skipped,uploaded_by,verification)
+    values (s_a,'UPLOADED_ARCHIVE','ZIP',h,10,1,1,0,owner1,'PROVIDER_FETCHED');
+  assert (select verification from public.repository_snapshot_sources where snapshot_id = s_a) = 'UNVERIFIED', 'an uploaded archive is always UNVERIFIED, whatever is passed';
+  delete from public.repository_snapshot_sources where snapshot_id = s_a;
+  insert into public.repository_snapshot_sources (snapshot_id,source_kind,archive_format,archive_sha256,archive_bytes,entries_total,files_accepted,files_skipped,uploaded_by,verification)
+    values (s_a,'GITHUB_ARCHIVE','ZIP',h,10,1,1,0,owner1,'UNVERIFIED');
+  assert (select verification from public.repository_snapshot_sources where snapshot_id = s_a) = 'PROVIDER_FETCHED', 'a GitHub-fetched archive is always PROVIDER_FETCHED';
+  delete from public.repository_snapshot_sources where snapshot_id = s_a;
   caught := false;
   begin
+    alter table public.repository_snapshot_sources disable trigger repository_snapshot_sources_set_verification;
     insert into public.repository_snapshot_sources (snapshot_id,source_kind,archive_format,archive_sha256,archive_bytes,entries_total,files_accepted,files_skipped,uploaded_by,verification)
-      values (s_a,'UPLOADED_ARCHIVE','ZIP',h,10,1,1,0,owner1,'VERIFIED');
+      values (s_a,'UPLOADED_ARCHIVE','ZIP',h,10,1,1,0,owner1,'PROVIDER_FETCHED');
   exception when check_violation then caught := true; end;
-  assert caught, 'only UNVERIFIED can be recorded';
+  alter table public.repository_snapshot_sources enable trigger repository_snapshot_sources_set_verification;
+  assert caught, 'even with the trigger off, the CHECK refuses a verification that does not match the source kind';
   caught := false;
   begin
     insert into public.repository_snapshot_sources (snapshot_id,source_kind,archive_format,archive_sha256,archive_bytes,entries_total,files_accepted,files_skipped,uploaded_by)

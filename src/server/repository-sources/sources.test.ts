@@ -265,10 +265,34 @@ describe("boundaries and exclusion accounting", () => {
       { ...L, maxFileBytes: 200, maxCompressionRatio: 1e9 },
     );
     const counts = countExclusions(a.skipped);
-    assert.deepEqual(counts, { oversized: 1, generated: 2, metadata: 1 });
-    assert.equal(counts.oversized + counts.generated + counts.metadata, a.skipped.length);
+    assert.deepEqual(counts, { oversized: 1, generated: 2, metadata: 1, sensitive: 0 });
+    assert.equal(counts.oversized + counts.generated + counts.metadata + counts.sensitive, a.skipped.length);
     assert.equal(a.manifest.length + a.skipped.length, a.entriesTotal);
     assert.deepEqual(a.manifest.map((m) => m.path), ["README.md", "src/a.ts"]);
+  });
+
+  it("files that may hold credentials are never recorded, hashed or kept, and are counted as sensitive", () => {
+    const a = readSourceArchive(
+      zip([
+        { name: "src/a.ts", data: SRC },
+        { name: ".env", data: "DB_PASSWORD=secret" },
+        { name: "config/.env.production", data: "TOKEN=x" },
+        { name: ".env.example", data: "DB_PASSWORD=" }, // a template: recorded
+        { name: "certs/server.pem", data: "-----BEGIN PRIVATE KEY-----" },
+        { name: "deploy/id_ed25519", data: "key" },
+        { name: ".npmrc", data: "//registry/:_authToken=x" },
+        { name: "src/keyboard.ts", data: SRC }, // look-alike name: recorded
+        { name: "node_modules/pkg/.env", data: "x" }, // inside a generated folder: counted as generated
+      ]),
+      L,
+    );
+    const counts = countExclusions(a.skipped);
+    assert.deepEqual(counts, { oversized: 0, generated: 1, metadata: 0, sensitive: 5 });
+    assert.deepEqual(a.manifest.map((m) => m.path), [".env.example", "src/a.ts", "src/keyboard.ts"]);
+    for (const secret of [".env", "config/.env.production", "certs/server.pem", "deploy/id_ed25519", ".npmrc"]) {
+      assert.equal(a.contents.has(secret), false, `${secret} bytes are not kept`);
+    }
+    assert.equal(a.manifest.length + a.skipped.length, a.entriesTotal);
   });
 
   it("an empty archive (no entries) is rejected", () => {

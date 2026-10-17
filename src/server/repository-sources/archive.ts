@@ -25,12 +25,13 @@ export type SourceArchive = {
 //   oversized: larger than the per-file limit (never decompressed, truncated or parsed)
 //   generated: inside an ignored generated/dependency folder (node_modules, .git, dist, build, .next, coverage)
 //   metadata:  archive-tool metadata (__MACOSX/)
-export type SkipCategory = "oversized" | "generated" | "metadata";
+//   sensitive: a file that commonly holds credentials (.env, private keys, .npmrc, ...): never hashed, recorded or parsed
+export type SkipCategory = "oversized" | "generated" | "metadata" | "sensitive";
 export type SkippedFile = { path: string; reason: string; category: SkipCategory };
 export type ExclusionCounts = Record<SkipCategory, number>;
 
 export function countExclusions(skipped: readonly SkippedFile[]): ExclusionCounts {
-  const counts: ExclusionCounts = { oversized: 0, generated: 0, metadata: 0 };
+  const counts: ExclusionCounts = { oversized: 0, generated: 0, metadata: 0, sensitive: 0 };
   for (const file of skipped) counts[file.category]++;
   return counts;
 }
@@ -38,6 +39,21 @@ export function countExclusions(skipped: readonly SkippedFile[]): ExclusionCount
 const COMMIT = /^([0-9a-f]{40}|[0-9a-f]{64})$/;
 // Mirrored in the database (private.manifest_payload_check, migration 20261019000001): change both together.
 const ARCHIVE_METADATA = "__MACOSX";
+
+// Files that commonly contain credentials, matched by file name only. This is a safety net, not secret scanning: such
+// files are counted as "sensitive" and never recorded, hashed or parsed (a hash of a low-entropy secret could be
+// guessed offline). Mirrored in the database (private.manifest_payload_check, migration 20261021000001).
+const SENSITIVE_NAMES = new Set([".npmrc", ".pypirc", ".netrc", ".git-credentials", ".htpasswd", "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519"]);
+const SENSITIVE_EXTENSIONS = [".pem", ".key", ".p12", ".pfx", ".jks", ".keystore"];
+const ENV_TEMPLATES = new Set([".env.example", ".env.sample", ".env.template", ".env.dist"]);
+
+export function isSensitivePath(path: string): boolean {
+  const name = (path.split("/").pop() ?? path).toLowerCase();
+  if (ENV_TEMPLATES.has(name)) return false;
+  if (name === ".env" || name.startsWith(".env.")) return true;
+  if (SENSITIVE_NAMES.has(name)) return true;
+  return SENSITIVE_EXTENSIONS.some((extension) => name.endsWith(extension));
+}
 
 export function readSourceArchive(buf: Buffer, limits: ArchiveLimits, now?: () => number): SourceArchive {
   if (buf.length === 0) throw new ArchiveError("The uploaded file is empty.");
@@ -82,11 +98,13 @@ export function readSourceArchive(buf: Buffer, limits: ArchiveLimits, now?: () =
   const skipped: SourceArchive["skipped"] = [];
   const kept: { path: string; content: Buffer }[] = [];
   for (const c of candidates) {
-    // One category per file, in this order: metadata, generated folder, oversized.
+    // One category per file, in this order: metadata, generated folder, sensitive, oversized.
     if (c.path === ARCHIVE_METADATA || c.path.startsWith(`${ARCHIVE_METADATA}/`)) {
       skipped.push({ path: c.path, reason: "archive metadata", category: "metadata" });
     } else if (isIgnoredPath(c.path)) {
       skipped.push({ path: c.path, reason: "ignored directory", category: "generated" });
+    } else if (isSensitivePath(c.path)) {
+      skipped.push({ path: c.path, reason: "may contain credentials", category: "sensitive" });
     } else if (c.data === null) {
       skipped.push({ path: c.path, reason: `larger than the ${formatBytes(limits.maxFileBytes)} per-file limit`, category: "oversized" });
     } else {

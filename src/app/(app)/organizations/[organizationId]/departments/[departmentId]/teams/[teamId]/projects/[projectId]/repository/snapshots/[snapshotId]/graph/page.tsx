@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { RepositoryGraphExplorer } from "@/components/repository-graph/repository-graph-explorer";
+import { RepositoryGraphWorkspace } from "@/components/repository-graph/repository-graph-workspace";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { ButtonLink } from "@/components/ui/button";
@@ -87,12 +88,35 @@ export default async function RepositoryGraphPage({
         />
       )}
 
-      {result.state === "too-large" && (
-        <EmptyState
-          icon={<IconNetwork size={20} />}
-          title="This analysis is too large to display"
-          description={`It stores ${result.analysis.symbols_count} symbols and ${result.analysis.relationships_count} relationships. This version draws analyses of up to ${GRAPH_MAX_SYMBOLS} symbols and ${GRAPH_MAX_RELATIONSHIPS} relationships, and does not show a partial graph as if it were complete.`}
-        />
+      {result.state === "explore" && (
+        <div className="flex flex-col gap-4">
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <MetricCard label="Symbols" value={result.analysis.symbols_count} icon={<IconSymbol size={15} />} />
+            <MetricCard label="Relationships" value={result.analysis.relationships_count} icon={<IconLink size={15} />} />
+            <MetricCard label="Files represented" value={result.overview.files.length} icon={<IconFileCode size={15} />} hint={`of ${result.analysis.files_total} in the snapshot`} />
+            <MetricCard
+              label="Files analysed"
+              value={
+                <>
+                  {result.analysis.files_analyzed}
+                  <span className="text-[15px] font-normal text-fg-3"> / {result.analysis.files_total}</span>
+                </>
+              }
+              icon={<IconCode size={15} />}
+            />
+          </div>
+          <Alert tone="info" title="Large analysis: explored in parts">
+            More than {GRAPH_MAX_SYMBOLS} symbols or {GRAPH_MAX_RELATIONSHIPS} relationships are too many to draw as one graph. Start from the overview,
+            open a file or search for a symbol; each view says what it contains and what it does not.
+          </Alert>
+          <RepositoryGraphWorkspace
+            key={result.analysis.id}
+            overview={result.overview}
+            dataUrl={`${snapshotsHref}/${snapshot.id}/graph/data`}
+            meta={{ analysisId: result.analysis.id, snapshotId: snapshot.id, commitSha: snapshot.commit_sha, branch: snapshot.branch }}
+            totals={{ symbols: result.analysis.symbols_count, relationships: result.analysis.relationships_count }}
+          />
+        </div>
       )}
 
       {result.state === "ready" && (
@@ -130,7 +154,13 @@ export default async function RepositoryGraphPage({
               description="The analysis completed, but no supported source file produced symbols. This is the real result of the analysis, not an error."
             />
           ) : (
-            <RepositoryGraphExplorer key={result.graph.analysisId} graph={result.graph} />
+            <>
+              <p className="t-small text-fg-2" data-graph-mode="complete">
+                <span className="font-medium text-fg">Complete graph.</span> Every stored symbol and relationship of this analysis is loaded; filters and
+                focus only change what is drawn.
+              </p>
+              <RepositoryGraphExplorer key={result.graph.analysisId} graph={result.graph} />
+            </>
           )}
         </div>
       )}

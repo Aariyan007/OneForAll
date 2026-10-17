@@ -11,17 +11,30 @@ import { GraphCanvas, type Selection } from "./graph-canvas";
 import { GraphDetails } from "./graph-details";
 import { KIND_ORDER, TYPE_ORDER, byOrder, kindMeta, typeMeta } from "./graph-style";
 
-// Interactive, read-only explorer of one completed structure analysis. All data arrives from the server already
-// authorized; this component only filters, lays out and inspects it.
+// Interactive, read-only explorer of one completed structure analysis, or of the explored part of a large one. All
+// data arrives from the server already authorized; this component only filters, lays out and inspects it.
 
-type Props = { graph: RepositoryGraph };
+// Optional extras for explored views of large analyses (absent for the complete graph):
+//   degrees    loaded vs stored relationships per symbol, so a partial neighbourhood is never shown as complete
+//   onExpand   load the neighbours of a symbol into the view
+//   onRefocus  start a new view from a symbol
+//   searchHint label of the search box (it always searches the symbols in `graph` only)
+export type ExplorerExtras = {
+  degrees?: ReadonlyMap<string, { loaded: number; stored: number | null; missing: number }>;
+  onExpand?: (nodeId: string) => void;
+  onRefocus?: (nodeId: string) => void;
+  busyNodeId?: string | null;
+  searchHint?: string;
+};
+
+type Props = { graph: RepositoryGraph } & ExplorerExtras;
 
 function initialFile(graph: RepositoryGraph): string | null {
   // Large graphs open one file at a time (stated in the UI), so the first view never exceeds the render limit blindly.
   return graph.nodes.length > RENDER_LIMIT ? (graph.nodes[0]?.fileId ?? null) : null;
 }
 
-export function RepositoryGraphExplorer({ graph }: Props) {
+export function RepositoryGraphExplorer({ graph, degrees, onExpand, onRefocus, busyNodeId = null, searchHint }: Props) {
   const kinds = useMemo(() => Object.keys(graph.summary.nodesByKind).sort(byOrder(KIND_ORDER)), [graph]);
   const types = useMemo(() => Object.keys(graph.summary.edgesByType).sort(byOrder(TYPE_ORDER)), [graph]);
   const files = useMemo(() => {
@@ -35,8 +48,11 @@ export function RepositoryGraphExplorer({ graph }: Props) {
   }, [graph]);
   const nodesById = useMemo(() => new Map<string, GraphNode>(graph.nodes.map((node) => [node.id, node])), [graph]);
 
-  const [kindFilter, setKindFilter] = useState<ReadonlySet<string>>(() => new Set(kinds));
-  const [typeFilter, setTypeFilter] = useState<ReadonlySet<string>>(() => new Set(types));
+  // Filters store what is HIDDEN, so kinds and types that appear later (an explored view growing) are shown by default.
+  const [hiddenKinds, setHiddenKinds] = useState<ReadonlySet<string>>(() => new Set());
+  const [hiddenTypes, setHiddenTypes] = useState<ReadonlySet<string>>(() => new Set());
+  const kindFilter = useMemo(() => new Set(kinds.filter((kind) => !hiddenKinds.has(kind))), [kinds, hiddenKinds]);
+  const typeFilter = useMemo(() => new Set(types.filter((type) => !hiddenTypes.has(type))), [types, hiddenTypes]);
   const [fileId, setFileId] = useState<string | null>(() => initialFile(graph));
   const [focusId, setFocusId] = useState<string | null>(null);
   const [selection, setSelection] = useState<Selection>(null);
@@ -72,8 +88,8 @@ export function RepositoryGraphExplorer({ graph }: Props) {
   };
 
   const reset = () => {
-    setKindFilter(new Set(kinds));
-    setTypeFilter(new Set(types));
+    setHiddenKinds(new Set());
+    setHiddenTypes(new Set());
     setFileId(initialFile(graph));
     setFocusId(null);
     setSelection(null);
@@ -81,13 +97,23 @@ export function RepositoryGraphExplorer({ graph }: Props) {
   };
 
   const reveal = (node: GraphNode) => {
-    setKindFilter((current) => (current.has(node.kind) ? current : new Set([...current, node.kind])));
+    setHiddenKinds((current) => {
+      if (!current.has(node.kind)) return current;
+      const next = new Set(current);
+      next.delete(node.kind);
+      return next;
+    });
     if (fileId !== null && fileId !== node.fileId) setFileId(node.fileId);
     if (focusId !== null && focusId !== node.id) setFocusId(null);
   };
 
-  const filtersActive =
-    kindFilter.size !== kinds.length || typeFilter.size !== types.length || fileId !== initialFile(graph) || focusId !== null || query !== "";
+  const filtersActive = hiddenKinds.size > 0 || hiddenTypes.size > 0 || fileId !== initialFile(graph) || focusId !== null || query !== "";
+  const pending = useMemo(() => {
+    if (!degrees) return undefined;
+    const map = new Map<string, number>();
+    for (const [id, info] of degrees) if (info.missing > 0) map.set(id, info.missing);
+    return map;
+  }, [degrees]);
   const focusNode = focusId ? nodesById.get(focusId) : undefined;
   const selectedHidden = selection?.type === "node" && !visibleIds.has(selection.id);
 
@@ -106,7 +132,7 @@ export function RepositoryGraphExplorer({ graph }: Props) {
               type="search"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search symbols by name or qualified name"
+              placeholder={searchHint ?? "Search symbols by name or qualified name"}
               autoComplete="off"
               className="h-9 w-full rounded-md border border-border-strong bg-bg-subtle pr-3 pl-9 text-[13px] text-fg placeholder:text-fg-3 outline-none transition-colors focus:border-accent"
             />
@@ -177,7 +203,7 @@ export function RepositoryGraphExplorer({ graph }: Props) {
         <div className="flex flex-col gap-3 md:flex-row md:gap-6">
           <FilterGroup label="Symbol kinds">
             {kinds.map((kind) => (
-              <Toggle key={kind} active={kindFilter.has(kind)} onClick={() => toggle(kindFilter, kind, setKindFilter)}>
+              <Toggle key={kind} active={kindFilter.has(kind)} onClick={() => toggle(hiddenKinds, kind, setHiddenKinds)}>
                 <span className="font-mono text-[10.5px]" style={{ color: kindMeta(kind).color }}>
                   {kindMeta(kind).glyph}
                 </span>
@@ -191,7 +217,7 @@ export function RepositoryGraphExplorer({ graph }: Props) {
               <span className="t-small text-fg-3">None stored for this analysis.</span>
             ) : (
               types.map((type) => (
-                <Toggle key={type} active={typeFilter.has(type)} onClick={() => toggle(typeFilter, type, setTypeFilter)}>
+                <Toggle key={type} active={typeFilter.has(type)} onClick={() => toggle(hiddenTypes, type, setHiddenTypes)}>
                   <LineSample type={type} />
                   {typeMeta(type).label}
                   <span className="tabular-nums text-fg-3">{graph.summary.edgesByType[type]}</span>
@@ -235,7 +261,7 @@ export function RepositoryGraphExplorer({ graph }: Props) {
               onReset={reset}
             />
           ) : (
-            <GraphCanvas layout={layout} edges={visible.edges} selection={selection} related={related} onSelect={select} />
+            <GraphCanvas layout={layout} edges={visible.edges} selection={selection} related={related} pending={pending} onSelect={select} />
           )}
           {selectedHidden && (
             <div className="absolute top-3 left-3 max-w-sm">
@@ -273,6 +299,10 @@ export function RepositoryGraphExplorer({ graph }: Props) {
               }
               setFocusId(id);
             }}
+            degrees={degrees}
+            onExpand={onExpand}
+            onRefocus={onRefocus}
+            busyNodeId={busyNodeId}
           />
         </Card>
       </div>

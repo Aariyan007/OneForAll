@@ -63,6 +63,32 @@ isOneToOne: false
       referencedColumns: ["id"]
     }
                   ]
+                },"jira_issues": {
+                  Row: {
+                    "assignee_name": string | null,"first_imported_at": string,"id": string,"integration_id": string,"issue_key": string,"issue_type": string | null,"jira_issue_id": string,"jira_project_key": string,"jira_site": string,"jira_updated_at": string | null,"last_synced_at": string,"missing_in_source": boolean,"priority_name": string | null,"project_id": string,"status_category": string,"status_name": string | null,"summary": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "assignee_name"?: string | null,"first_imported_at"?: string,"id"?: string,"integration_id": string,"issue_key": string,"issue_type"?: string | null,"jira_issue_id": string,"jira_project_key": string,"jira_site": string,"jira_updated_at"?: string | null,"last_synced_at"?: string,"missing_in_source"?: boolean,"priority_name"?: string | null,"project_id": string,"status_category"?: string,"status_name"?: string | null,"summary": string
+                  }
+                  Update: {
+                    "assignee_name"?: string | null,"first_imported_at"?: string,"id"?: string,"integration_id"?: string,"issue_key"?: string,"issue_type"?: string | null,"jira_issue_id"?: string,"jira_project_key"?: string,"jira_site"?: string,"jira_updated_at"?: string | null,"last_synced_at"?: string,"missing_in_source"?: boolean,"priority_name"?: string | null,"project_id"?: string,"status_category"?: string,"status_name"?: string | null,"summary"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "jira_issues_integration_id_fkey"
+      columns: ["integration_id"]
+isOneToOne: false
+      referencedRelation: "project_integrations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "jira_issues_project_id_fkey"
+      columns: ["project_id"]
+isOneToOne: false
+      referencedRelation: "projects"
+      referencedColumns: ["id"]
+    }
+                  ]
                 },"organization_members": {
                   Row: {
                     "created_at": string,"id": string,"organization_id": string,"role": string,"user_id": string
@@ -110,6 +136,26 @@ isOneToOne: false
                   }
                   Relationships: [
                     
+                  ]
+                },"project_integrations": {
+                  Row: {
+                    "created_at": string,"created_by": string | null,"has_credential": boolean,"id": string,"jira_account_email": string | null,"jira_project_id": string | null,"jira_project_key": string | null,"jira_project_name": string | null,"jira_site": string | null,"kind": string,"last_checked_at": string | null,"last_error": string | null,"last_sync_at": string | null,"last_sync_message": string | null,"last_sync_status": string | null,"project_id": string,"status": string,"updated_at": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "created_at"?: string,"created_by"?: string | null,"has_credential"?: boolean,"id"?: string,"jira_account_email"?: string | null,"jira_project_id"?: string | null,"jira_project_key"?: string | null,"jira_project_name"?: string | null,"jira_site"?: string | null,"kind": string,"last_checked_at"?: string | null,"last_error"?: string | null,"last_sync_at"?: string | null,"last_sync_message"?: string | null,"last_sync_status"?: string | null,"project_id": string,"status"?: string,"updated_at"?: string
+                  }
+                  Update: {
+                    "created_at"?: string,"created_by"?: string | null,"has_credential"?: boolean,"id"?: string,"jira_account_email"?: string | null,"jira_project_id"?: string | null,"jira_project_key"?: string | null,"jira_project_name"?: string | null,"jira_site"?: string | null,"kind"?: string,"last_checked_at"?: string | null,"last_error"?: string | null,"last_sync_at"?: string | null,"last_sync_message"?: string | null,"last_sync_status"?: string | null,"project_id"?: string,"status"?: string,"updated_at"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "project_integrations_project_id_fkey"
+      columns: ["project_id"]
+isOneToOne: false
+      referencedRelation: "projects"
+      referencedColumns: ["id"]
+    }
                   ]
                 },"projects": {
                   Row: {
@@ -173,14 +219,14 @@ isOneToOne: false
                   ]
                 },"repository_snapshot_sources": {
                   Row: {
-                    "archive_bytes": number,"archive_commit": string | null,"archive_format": string,"archive_sha256": string,"created_at": string,"entries_total": number,"files_accepted": number,"files_skipped": number,"files_skipped_generated": number | null,"files_skipped_metadata": number | null,"files_skipped_oversized": number | null,"snapshot_id": string,"source_kind": string,"uploaded_by": string | null,"verification": string
+                    "archive_bytes": number,"archive_commit": string | null,"archive_format": string,"archive_sha256": string,"created_at": string,"entries_total": number,"files_accepted": number,"files_skipped": number,"files_skipped_generated": number | null,"files_skipped_metadata": number | null,"files_skipped_oversized": number | null,"files_skipped_sensitive": number | null,"snapshot_id": string,"source_kind": string,"uploaded_by": string | null,"verification": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "archive_bytes": number,"archive_commit"?: string | null,"archive_format": string,"archive_sha256": string,"created_at"?: string,"entries_total": number,"files_accepted": number,"files_skipped": number,"files_skipped_generated"?: number | null,"files_skipped_metadata"?: number | null,"files_skipped_oversized"?: number | null,"snapshot_id": string,"source_kind": string,"uploaded_by"?: string | null,"verification"?: string
+                    "archive_bytes": number,"archive_commit"?: string | null,"archive_format": string,"archive_sha256": string,"created_at"?: string,"entries_total": number,"files_accepted": number,"files_skipped": number,"files_skipped_generated"?: number | null,"files_skipped_metadata"?: number | null,"files_skipped_oversized"?: number | null,"files_skipped_sensitive"?: number | null,"snapshot_id": string,"source_kind": string,"uploaded_by"?: string | null,"verification"?: string
                   }
                   Update: {
-                    "archive_bytes"?: number,"archive_commit"?: string | null,"archive_format"?: string,"archive_sha256"?: string,"created_at"?: string,"entries_total"?: number,"files_accepted"?: number,"files_skipped"?: number,"files_skipped_generated"?: number | null,"files_skipped_metadata"?: number | null,"files_skipped_oversized"?: number | null,"snapshot_id"?: string,"source_kind"?: string,"uploaded_by"?: string | null,"verification"?: string
+                    "archive_bytes"?: number,"archive_commit"?: string | null,"archive_format"?: string,"archive_sha256"?: string,"created_at"?: string,"entries_total"?: number,"files_accepted"?: number,"files_skipped"?: number,"files_skipped_generated"?: number | null,"files_skipped_metadata"?: number | null,"files_skipped_oversized"?: number | null,"files_skipped_sensitive"?: number | null,"snapshot_id"?: string,"source_kind"?: string,"uploaded_by"?: string | null,"verification"?: string
                   }
                   Relationships: [
                     {
@@ -430,6 +476,9 @@ isOneToOne: false
               "department_id": string,"description": string,"id": string,"name": string,"slug": string
             }[]
                            },
+"disconnect_project_integration":
+{ Args: { "p_integration_id": string }; Returns: undefined
+                           },
 "fail_snapshot_ingestion":
 { Args: { "p_error_message": string,"p_run_token": string,"p_snapshot_id": string }; Returns: {
               "snapshot_id": string,"status": string
@@ -445,11 +494,17 @@ isOneToOne: false
               "analysis_id": string,"status": string
             }[]
                            },
+"get_integration_ciphertext":
+{ Args: { "p_integration_id": string }; Returns: string
+                           },
 "has_org_role":
 { Args: { "p_org_id": string,"p_roles": (string)[] }; Returns: boolean
                            },
 "is_org_member":
 { Args: { "p_org_id": string }; Returns: boolean
+                           },
+"mark_missing_jira_issues":
+{ Args: { "p_integration_id": string,"p_seen_at": string }; Returns: number
                            },
 "persist_snapshot_manifest":
 { Args: { "p_files": Json,"p_run_token": string,"p_signature": string,"p_snapshot_id": string,"p_source": Json }; Returns: {
@@ -461,13 +516,52 @@ isOneToOne: false
               "id": string,"relationships_count": number,"status": string,"symbols_count": number
             }[]
                            },
+"record_integration_result":
+{ Args: { "p_integration_id": string,"p_message": string,"p_status": string,"p_sync_status": string }; Returns: undefined
+                           },
+"repository_graph_edges":
+{ Args: { "p_analysis_id": string,"p_limit"?: number,"p_symbol_ids": (string)[],"p_types"?: (string)[] }; Returns: {
+              "analysis_id": string,"id": string,"relationship_type": string,"source_symbol_id": string,"target_symbol_id": string,"total_relationships": number
+            }[]
+                           },
+"repository_graph_overview":
+{ Args: { "p_analysis_id": string }; Returns: {
+              "external_relationships": number,"file_id": string,"path": string,"relationships": number,"symbols": number
+            }[]
+                           },
+"repository_graph_search":
+{ Args: { "p_analysis_id": string,"p_limit"?: number,"p_query": string }; Returns: {
+              "file_id": string,"id": string,"kind": string,"name": string,"path": string,"qualified_name": string,"start_line": number,"total_matches": number
+            }[]
+                           },
+"repository_graph_summary":
+{ Args: { "p_analysis_id": string }; Returns: {
+              "category": string,"name": string,"total": number
+            }[]
+                           },
+"repository_graph_symbols":
+{ Args: { "p_analysis_id": string,"p_file_id"?: string,"p_ids"?: (string)[],"p_limit"?: number }; Returns: {
+              "analysis_id": string,"degree": number,"end_line": number,"file_id": string,"id": string,"kind": string,"name": string,"path": string,"qualified_name": string,"signature": string,"start_column": number,"start_line": number,"visibility": string
+            }[]
+                           },
 "reset_structure_analysis":
 { Args: { "p_analysis_id": string }; Returns: {
               "analysis_id": string,"status": string
             }[]
                            },
+"save_project_integration":
+{ Args: { "p_ciphertext"?: string,"p_clear_credential"?: boolean,"p_jira_account_email"?: string,"p_jira_site"?: string,"p_kind": string,"p_project_id": string }; Returns: string
+                           },
+"select_jira_project":
+{ Args: { "p_integration_id": string,"p_project_id": string,"p_project_key": string,"p_project_name": string }; Returns: undefined
+                           },
 "slugify":
 { Args: { "p_fallback"?: string,"p_input": string }; Returns: string
+                           },
+"upsert_jira_issues":
+{ Args: { "p_integration_id": string,"p_issues": Json,"p_seen_at": string }; Returns: {
+              "inserted": number,"updated": number
+            }[]
                            }
           }
           Enums: {
