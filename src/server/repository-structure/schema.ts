@@ -50,5 +50,5 @@ export const persistedRelationshipSchema = z.object({
 export type PersistedSymbol = z.infer<typeof persistedSymbolSchema>;
 export type PersistedRelationship = z.infer<typeof persistedRelationshipSchema>;
 
-export type AnalysisActionState = { error?: string };
+export type AnalysisActionState = { error?: string; success?: string };
 export type AnalysisActionResult = { error?: string };

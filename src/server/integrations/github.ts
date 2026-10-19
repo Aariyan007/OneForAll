@@ -40,7 +40,16 @@ export function gitHubRepoFromUrl(repositoryUrl: string): GitHubRepo | null {
 
 export type GitHubBranch = { name: string; sha: string };
 export type GitHubCommit = { sha: string; message: string; authoredAt: string | null; htmlUrl: string };
-export type GitHubRepository = { fullName: string; owner: string; name: string; private: boolean; defaultBranch: string; htmlUrl: string };
+export type GitHubRepository = {
+  fullName: string;
+  owner: string;
+  name: string;
+  private: boolean;
+  // "public" | "private" | "internal" (GitHub Enterprise Cloud); undefined when GitHub omits it.
+  visibility?: string;
+  defaultBranch: string;
+  htmlUrl: string;
+};
 
 const repoPath = (repo: GitHubRepo) => `/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}`;
 
@@ -91,8 +100,16 @@ export class GitHubClient {
   }
 
   async getRepository(repo: GitHubRepo): Promise<GitHubRepository> {
-    const r = await this.get<{ full_name: string; owner: { login: string }; name: string; private: boolean; default_branch: string; html_url: string }>(repoPath(repo));
-    return { fullName: r.full_name, owner: r.owner.login, name: r.name, private: r.private, defaultBranch: r.default_branch, htmlUrl: r.html_url };
+    const r = await this.get<{ full_name: string; owner: { login: string }; name: string; private: boolean; visibility?: unknown; default_branch: string; html_url: string }>(repoPath(repo));
+    return {
+      fullName: r.full_name,
+      owner: r.owner.login,
+      name: r.name,
+      private: r.private,
+      visibility: typeof r.visibility === "string" ? r.visibility : undefined,
+      defaultBranch: r.default_branch,
+      htmlUrl: r.html_url,
+    };
   }
 
   async listBranches(repo: GitHubRepo): Promise<{ branches: GitHubBranch[]; truncated: boolean }> {

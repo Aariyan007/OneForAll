@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { GitHubImportLauncher } from "@/components/integrations/integration-client";
+import { ProjectTeamsEditor } from "@/components/tasks/task-controls";
 import { DisconnectRepositoryForm } from "@/components/repositories/disconnect-repository-form";
 import { RepositoryIntelligence } from "@/components/repository-snapshots/repository-intelligence";
 import { ButtonLink } from "@/components/ui/button";
@@ -19,11 +21,14 @@ import {
 import { PageBody, PageHeader, SectionHeader } from "@/components/ui/page";
 import { StatusBadge } from "@/components/ui/status";
 import { idSchema } from "@/server/departments/schema";
+import { gitHubTargetOf } from "@/server/integrations/service";
 import { getMyProject, getTeamContext } from "@/server/projects/queries";
 import { disconnectRepository } from "@/server/repositories/actions";
 import { getMyRepository } from "@/server/repositories/queries";
 import { PROVIDER_LABELS, STATUS_LABELS, VISIBILITY_LABELS } from "@/server/repositories/schema";
 import { listRequirements } from "@/server/requirements/queries";
+import { listDepartmentsWithTeams } from "@/server/workforce/queries";
+import { createClient } from "@/lib/supabase/server";
 
 export const metadata = { title: "Project · OneForAll" };
 
@@ -34,12 +39,17 @@ function label(labels: Record<string, string>, value: string) {
 
 export default async function ProjectPage({
   params,
+  searchParams,
 }: PageProps<"/organizations/[organizationId]/departments/[departmentId]/teams/[teamId]/projects/[projectId]">) {
   const { organizationId, departmentId, teamId, projectId } = await params;
+  // Set by the GitHub import after a successful import; only ever used to look up a snapshot of this repository.
+  const imported = (await searchParams).imported;
+  const importedSnapshotId = typeof imported === "string" && idSchema.safeParse(imported).success ? imported : undefined;
   if (!idSchema.safeParse(projectId).success) notFound();
 
   const context = await getTeamContext(organizationId, departmentId, teamId);
-  if (!context || !context.canView) notFound();
+  // No team-membership pre-check: getMyProject() is RLS-filtered, which also admits collaborating teams.
+  if (!context) notFound();
   const { organization, department, team, canManage } = context;
 
   // Scoped to this team and RLS-filtered: a project from another team or tenant is simply not found.
@@ -47,7 +57,15 @@ export default async function ProjectPage({
   if (!project) notFound();
 
   // RLS returns the repository only when this project is visible to the caller.
-  const [repository, requirements] = await Promise.all([getMyRepository(project.id), listRequirements(project.id)]);
+  const supabase = await createClient();
+  const [repository, requirements, { data: collaborators }, orgTeams] = await Promise.all([
+    getMyRepository(project.id),
+    listRequirements(project.id),
+    supabase.from("project_teams").select("team_id").eq("project_id", project.id),
+    canManage ? listDepartmentsWithTeams(organization.id) : Promise.resolve([]),
+  ]);
+  const allTeams = orgTeams.flatMap((d) => d.teams.map((t) => ({ id: t.id, name: `${d.name} / ${t.name}` })));
+  const collaboratorIds = new Set((collaborators ?? []).map((c) => c.team_id));
 
   const deptsHref = `/organizations/${organization.id}/departments`;
   const teamsHref = `${deptsHref}/${department.id}/teams`;
@@ -55,6 +73,8 @@ export default async function ProjectPage({
   const projectPath = `${projectsHref}/${project.id}`;
   const openRequirements = requirements.filter((r) => r.status !== "COMPLETED" && r.status !== "CANCELLED").length;
   const doneRequirements = requirements.filter((r) => r.status === "COMPLETED").length;
+  // Automatic import needs a github.com repository; any other repository uses the ZIP upload on a snapshot.
+  const gitHubImport = canManage && gitHubTargetOf(repository) !== null;
 
   return (
     <PageBody>
@@ -164,6 +184,26 @@ export default async function ProjectPage({
                   />
                   <RepoFact label="Status" value={label(STATUS_LABELS, repository.status)} />
                 </div>
+                {/* UI hint only. The import route re-checks OWNER/ADMIN and the database decides every write. */}
+                {gitHubImport && (
+                  <div className="flex flex-col gap-2 border-t border-border px-5 py-4">
+                    {repository.status === "ERROR" && (
+                      <p className="t-small text-warning">
+                        GitHub did not allow access to this repository on the last check. A private repository needs a token:{" "}
+                        <Link href={`${projectPath}/integrations`} className="underline underline-offset-2">
+                          add one under Integrations
+                        </Link>
+                        , then import again.
+                      </p>
+                    )}
+                    <GitHubImportLauncher
+                      apiUrl={`${projectPath}/integrations/github`}
+                      defaultBranch={repository.default_branch}
+                      snapshotsHref={`${projectPath}/repository/snapshots`}
+                      resultHref={`${projectPath}?imported={snapshotId}#intelligence`}
+                    />
+                  </div>
+                )}
                 {/* UI hint only. The database enforces who may actually disconnect. */}
                 {canManage && (
                   <CardFooter className="justify-end">
@@ -203,6 +243,8 @@ export default async function ProjectPage({
               repositoryId={repository.id}
               repositoryPath={`/organizations/${organization.id}/departments/${department.id}/teams/${team.id}/projects/${project.id}/repository`}
               canManage={canManage}
+              gitHubImport={gitHubImport}
+              importedSnapshotId={importedSnapshotId}
             />
           )}
         </div>
@@ -224,12 +266,26 @@ export default async function ProjectPage({
               />
             </div>
           </Card>
+          <Card>
+            <CardHeader title="Teams on this project" description={`${team.name} owns it. Collaborating teams can see it and receive handoffs.`} />
+            <div className="px-5 py-4">
+              {canManage ? (
+                <ProjectTeamsEditor
+                  ids={{ organizationId: organization.id, departmentId: department.id, teamId: team.id, projectId: project.id }}
+                  teams={allTeams.filter((t) => collaboratorIds.has(t.id))}
+                  available={allTeams.filter((t) => t.id !== team.id && !collaboratorIds.has(t.id))}
+                />
+              ) : (
+                <p className="t-small text-fg-2">{collaboratorIds.size === 0 ? "No collaborating teams." : `${collaboratorIds.size} collaborating team${collaboratorIds.size === 1 ? "" : "s"}.`}</p>
+              )}
+            </div>
+          </Card>
           <Card className="px-5 py-4">
             <p className="t-caption text-fg-3">Access</p>
             <p className="t-small mt-1.5 text-fg-2">
               {canManage
                 ? "You can manage this project as an organization owner or admin."
-                : "You have read-only access to this project as a team member."}
+                : "You can work on tasks assigned to you; planning and assignment are done by owners and admins."}
             </p>
           </Card>
         </aside>

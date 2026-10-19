@@ -16,9 +16,11 @@ export async function getProjectContext(
   if (!idSchema.safeParse(projectId).success) return null;
 
   const context = await getTeamContext(organizationId, departmentId, teamId);
-  if (!context || !context.canView) return null;
+  if (!context) return null;
 
-  // Scoped to the team and RLS-filtered: a project from another team or tenant is simply not found.
+  // Scoped to the team and RLS-filtered: a project from another team or tenant is simply not found. RLS alone decides
+  // visibility (OWNER/ADMIN, members of the project's team, and since migration 20261024000001 members of a
+  // collaborating team), so no separate team-membership pre-check here.
   const project = await getMyProject(context.team.id, projectId);
   if (!project) return null;
 

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { AnalyzeStructureForm } from "@/components/repository-structure/analyze-structure-form";
 import { Alert } from "@/components/ui/alert";
-import { ButtonLink } from "@/components/ui/button";
+import { ButtonLink, buttonClass } from "@/components/ui/button";
 import { Card, CardHeader } from "@/components/ui/card";
 import { EmptyState, MetricCard, formatDateTime } from "@/components/ui/data";
 import {
@@ -34,6 +34,11 @@ type Props = {
   repositoryId: string;
   repositoryPath: string; // .../projects/[projectId]/repository
   canManage: boolean;
+  // A github.com repository the caller may import into: offer "Import from GitHub" (opens the panel on the
+  // repository card through #import-github).
+  gitHubImport?: boolean;
+  // A snapshot the GitHub import just created (from ?imported=): confirmed from the database, never assumed.
+  importedSnapshotId?: string;
 };
 
 const PREVIEW_COUNT = 5;
@@ -56,6 +61,8 @@ export async function RepositoryIntelligence({
   repositoryId,
   repositoryPath,
   canManage,
+  gitHubImport = false,
+  importedSnapshotId,
 }: Props) {
   const snapshots = await listSnapshots(repositoryId);
   const latest = snapshots[0];
@@ -65,6 +72,9 @@ export async function RepositoryIntelligence({
   const canRun = canManage && analyzable && (!analysis || analysis.status === "PENDING" || analysis.status === "FAILED");
   // Never offer an action that is certain to fail (no repository source ingestion / persistence key yet).
   const readiness = getAnalysisReadiness();
+  // Only a snapshot of THIS repository (RLS-filtered list) is confirmed; any other id is ignored.
+  const imported = importedSnapshotId ? snapshots.find((snapshot) => snapshot.id === importedSnapshotId) : undefined;
+  const importedAnalysis = imported ? (imported.id === analyzable?.id ? analysis : await getAnalysisForSnapshot(imported.id)) : null;
 
   return (
     <section id="intelligence" className="scroll-mt-24">
@@ -75,6 +85,13 @@ export async function RepositoryIntelligence({
         actions={
           <>
             {/* UI hint only. The database enforces who may actually create snapshots. */}
+            {gitHubImport && (
+              // A plain anchor: a hash-only next/link navigation does not fire `hashchange`.
+              <a href="#import-github" className={buttonClass("primary", "sm")}>
+                <IconBranch size={14} />
+                Import from GitHub
+              </a>
+            )}
             {canManage && (
               <ButtonLink href={`${repositoryPath}/snapshots/new`} variant="secondary" size="sm">
                 <IconPlus size={14} />
@@ -91,18 +108,54 @@ export async function RepositoryIntelligence({
         }
       />
 
+      {imported && (
+        <Alert
+          tone={imported.status === "COMPLETED" && importedAnalysis?.status === "COMPLETED" ? "success" : "warning"}
+          title={imported.status === "COMPLETED" ? "Imported from GitHub" : "GitHub import not completed"}
+          className="mb-4"
+        >
+          Commit <span className="font-mono">{imported.commit_sha.slice(0, 12)}</span> on <span className="font-mono">{imported.branch}</span>:
+          snapshot {statusLabel(imported.status).toLowerCase()}
+          {imported.status === "COMPLETED" && ` (${imported.fileCount} files recorded)`}, structure analysis{" "}
+          {importedAnalysis ? analysisStatusLabel(importedAnalysis.status).toLowerCase() : "not started"}.{" "}
+          <Link href={`${repositoryPath}/snapshots/${imported.id}`} className="underline underline-offset-2">
+            Open the snapshot
+          </Link>
+          {importedAnalysis?.status === "COMPLETED" && (
+            <>
+              {" · "}
+              <Link href={`${repositoryPath}/snapshots/${imported.id}/graph`} className="underline underline-offset-2">
+                View the repository graph
+              </Link>
+            </>
+          )}
+        </Alert>
+      )}
+
       {!latest ? (
         <EmptyState
           compact
           icon={<IconCommit size={20} />}
           title="No snapshots available"
-          description="A snapshot records the repository at a specific commit. Structure analysis runs on completed snapshots."
+          description={
+            gitHubImport
+              ? "A snapshot records the repository at a specific commit. Import a commit from GitHub, or create a snapshot and upload a ZIP of it. Structure analysis runs on completed snapshots."
+              : "A snapshot records the repository at a specific commit. Structure analysis runs on completed snapshots."
+          }
           action={
             canManage && (
-              <ButtonLink href={`${repositoryPath}/snapshots/new`} variant="primary">
-                <IconPlus size={15} />
-                Create snapshot
-              </ButtonLink>
+              <div className="flex flex-wrap justify-center gap-2">
+                {gitHubImport && (
+                  <a href="#import-github" className={buttonClass("primary")}>
+                    <IconBranch size={15} />
+                    Import from GitHub
+                  </a>
+                )}
+                <ButtonLink href={`${repositoryPath}/snapshots/new`} variant={gitHubImport ? "secondary" : "primary"}>
+                  <IconPlus size={15} />
+                  Create snapshot
+                </ButtonLink>
+              </div>
             )
           }
         />

@@ -30,6 +30,8 @@ export const createSnapshotSchema = z.object({ commitSha: commitShaSchema, branc
 
 export type SnapshotFormState = {
   error?: string;
+  // Page to open after success (server-built from verified ids); see src/components/ui/reload.ts.
+  redirectTo?: string;
   fieldErrors?: { commitSha?: string[]; branch?: string[] };
 };
 

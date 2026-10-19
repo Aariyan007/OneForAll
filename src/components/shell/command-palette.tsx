@@ -37,13 +37,15 @@ export function CommandPalette({
 
   const commands = useMemo<Command[]>(() => {
     const list: Command[] = [];
-    for (const section of buildNav(parseRoute(pathname))) {
+    const route = parseRoute(pathname);
+    for (const section of buildNav(route, organizations.find((o) => o.id === route.organizationId)?.role)) {
       for (const item of section.items) {
         if (item.href) list.push({ id: `nav-${item.key}`, label: item.label, group: section.title, href: item.href, icon: item.icon });
       }
     }
     list.push({ id: "create-org", label: "Create organization", group: "Actions", href: "/organizations/new", icon: "building" });
     for (const org of organizations) {
+      list.push({ id: `org-overview-${org.id}`, label: `${org.name} — Overview`, group: "Organizations", href: `/organizations/${org.id}/overview`, icon: "building" });
       list.push({ id: `org-${org.id}`, label: `${org.name} — Departments`, group: "Organizations", href: `/organizations/${org.id}/departments`, icon: "layers" });
     }
     return list;

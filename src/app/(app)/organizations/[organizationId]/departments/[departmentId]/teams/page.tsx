@@ -5,14 +5,13 @@ import { Avatar, EmptyState, MetricCard, Stat } from "@/components/ui/data";
 import { IconArrowRight, IconLayers, IconPlus, IconUsers } from "@/components/ui/icons";
 import { PageBody, PageHeader } from "@/components/ui/page";
 import { requireUser } from "@/server/auth/session";
+import { can } from "@/lib/authz/permissions";
 import { idSchema } from "@/server/departments/schema";
 import { listDepartments } from "@/server/departments/queries";
 import { getMyOrganization } from "@/server/organizations/queries";
 import { getMyDepartment, listTeams } from "@/server/teams/queries";
 
 export const metadata = { title: "Teams · OneForAll" };
-
-const CAN_MANAGE = ["OWNER", "ADMIN"];
 
 export default async function TeamsPage({
   params,
@@ -31,7 +30,7 @@ export default async function TeamsPage({
   // Presentation only: the department's description and member count from the existing list query.
   const details = departments.find((d) => d.id === department.id);
   // UI hint only. The database enforces who may actually create teams.
-  const canManage = CAN_MANAGE.includes(organization.role);
+  const canManage = can(organization.role, "hierarchy.manage");
   const deptsHref = `/organizations/${organization.id}/departments`;
   const newHref = `${deptsHref}/${department.id}/teams/new`;
 

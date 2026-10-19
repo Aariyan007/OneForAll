@@ -6,6 +6,7 @@ import { useActionState, useEffect, useState } from "react";
 import { Alert } from "@/components/ui/alert";
 import { Spinner, buttonClass } from "@/components/ui/button";
 import { IconArrowRight, IconBranch, IconCommit, IconExternal, IconNetwork } from "@/components/ui/icons";
+import { reloadWithNotice, useReloadOnSuccess } from "@/components/ui/reload";
 import type { IntegrationFormState } from "@/server/integrations/actions";
 
 // Client parts of the project Integrations page. Every state shown here comes from a server response: no optimistic
@@ -38,12 +39,19 @@ async function postJson<T>(url: string, payload: unknown): Promise<T> {
 }
 
 // A small form bound to a Server Action, with server-confirmed success / error messages.
+// Reloads after success only for actions that change something (check access does not).
+function useReloadOnSuccessIf(enabled: boolean, state: IntegrationFormState): boolean {
+  const done = useReloadOnSuccess(enabled ? state : null);
+  return enabled && done;
+}
+
 export function ActionForm({
   action,
   submitLabel,
   pendingLabel,
   variant = "primary",
   confirm,
+  reloadOnSuccess = true,
   children,
 }: {
   action: Action;
@@ -51,9 +59,15 @@ export function ActionForm({
   pendingLabel: string;
   variant?: "primary" | "secondary" | "danger";
   confirm?: string;
+  // false for actions that change nothing on the server (the message is shown in place).
+  reloadOnSuccess?: boolean;
   children?: React.ReactNode;
 }) {
+  // A successful change reloads the page (the actions do not revalidate; see src/components/ui/reload.ts) and its
+  // message is shown again after the reload. The Server Action is used directly (no-JavaScript posts keep working).
   const [state, formAction, pending] = useActionState<IntegrationFormState, FormData>(action, {});
+  const reloading = useReloadOnSuccessIf(reloadOnSuccess, state);
+  const busy = pending || reloading;
   return (
     <form
       action={formAction}
@@ -64,9 +78,9 @@ export function ActionForm({
     >
       {children}
       <div>
-        <button type="submit" disabled={pending} aria-busy={pending} className={buttonClass(variant, "sm")}>
-          {pending && <Spinner />}
-          {pending ? pendingLabel : submitLabel}
+        <button type="submit" disabled={busy} aria-busy={busy} className={buttonClass(variant, "sm")}>
+          {busy && <Spinner />}
+          {busy ? pendingLabel : submitLabel}
         </button>
       </div>
       {state.error && <Alert tone="danger">{state.error}</Alert>}
@@ -104,32 +118,63 @@ export function TextField({ name, label, hint, placeholder, type = "text" }: { n
 
 type Branch = { name: string; sha: string };
 type Commit = { sha: string; branch: string; message: string; authoredAt: string | null; htmlUrl: string };
-type ImportResponse = { ok: boolean; error?: string; message?: string; analysisError?: string; snapshotId?: string };
+type ImportResponse = { ok: boolean; error?: string; code?: string; message?: string; analysisError?: string; snapshotId?: string };
 
-export function GitHubImportPanel({ apiUrl, defaultBranch, snapshotsHref }: { apiUrl: string; defaultBranch: string; snapshotsHref: string }) {
+// `resultHref` (with "{snapshotId}"): where a successful import continues, as a full page load. The outcome is then
+// rendered by the server from the database (snapshot list, repository status) instead of relying on a client refresh
+// of the current page, which this Next.js version did not apply reliably (observed with router.refresh()).
+export function GitHubImportPanel({
+  apiUrl,
+  defaultBranch,
+  snapshotsHref,
+  resultHref,
+}: {
+  apiUrl: string;
+  defaultBranch: string;
+  snapshotsHref: string;
+  resultHref?: string;
+}) {
   const router = useRouter();
   const [branches, setBranches] = useState<{ list: Branch[]; truncated: boolean } | null>(null);
   const [branchError, setBranchError] = useState<string | null>(null);
   const [branch, setBranch] = useState(defaultBranch);
   const [commitInput, setCommitInput] = useState("");
   const [commit, setCommit] = useState<Commit | null>(null);
-  const [phase, setPhase] = useState<"idle" | "resolving" | "importing">("idle");
+  const [phase, setPhase] = useState<"idle" | "resolving" | "importing" | "opening">("idle");
+  const [repositoryInfo, setRepositoryInfo] = useState<{ private: boolean } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ImportResponse | null>(null);
+  const [attempt, setAttempt] = useState(0);
 
+  // Loading the branches also checks the repository on GitHub; the server records the outcome on the repository
+  // (Connected with its visibility, or Error), so the page is refreshed when that changed.
   useEffect(() => {
     let active = true;
-    getJson<{ ok: boolean; branches?: Branch[]; truncated?: boolean; error?: string }>(`${apiUrl}?op=branches`)
+    getJson<{ ok: boolean; branches?: Branch[]; truncated?: boolean; defaultBranch?: string; private?: boolean; repositoryChanged?: boolean; error?: string }>(
+      `${apiUrl}?op=branches`,
+    )
       .then((body) => {
         if (!active) return;
-        if (body.ok && body.branches) setBranches({ list: body.branches, truncated: Boolean(body.truncated) });
-        else setBranchError(body.error ?? "Branches could not be loaded.");
+        if (body.repositoryChanged) router.refresh();
+        if (body.ok && body.branches) {
+          const list = body.branches;
+          setBranches({ list, truncated: Boolean(body.truncated) });
+          setRepositoryInfo({ private: Boolean(body.private) });
+          // The recorded default branch may not exist on GitHub (it was typed by hand): fall back to GitHub's default.
+          setBranch((current) => (list.some((b) => b.name === current) || !body.defaultBranch ? current : body.defaultBranch));
+        } else setBranchError(body.error ?? "Branches could not be loaded.");
       })
       .catch((e: unknown) => active && setBranchError(e instanceof Error ? e.message : "Branches could not be loaded."));
     return () => {
       active = false;
     };
-  }, [apiUrl]);
+  }, [apiUrl, attempt, router]);
+
+  const reloadBranches = () => {
+    setBranchError(null);
+    setBranches(null);
+    setAttempt((n) => n + 1);
+  };
 
   const busy = phase !== "idle";
 
@@ -154,14 +199,21 @@ export function GitHubImportPanel({ apiUrl, defaultBranch, snapshotsHref }: { ap
     setPhase("importing");
     setError(null);
     setResult(null);
+    let opening = false;
     try {
       const body = await postJson<ImportResponse>(apiUrl, { op: "import", branch: commit.branch, sha: commit.sha });
       setResult(body);
+      if (body.ok && body.snapshotId && resultHref) {
+        opening = true;
+        setPhase("opening");
+        window.location.assign(resultHref.replace("{snapshotId}", encodeURIComponent(body.snapshotId)));
+        return;
+      }
       router.refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "The import failed.");
     } finally {
-      setPhase("idle");
+      if (!opening) setPhase("idle");
     }
   };
 
@@ -184,8 +236,19 @@ export function GitHubImportPanel({ apiUrl, defaultBranch, snapshotsHref }: { ap
           ) : (
             <input id="gh-branch" value={branch} disabled={busy} onChange={(e) => { setBranch(e.target.value); setCommit(null); }} className={`${INPUT} font-mono`} />
           )}
-          <p className="text-[12px] text-fg-3">
-            {branchError ? <span className="text-warning">{branchError}</span> : branches ? `${branches.list.length} branches${branches.truncated ? " (first 300 shown)" : ""}` : "Loading branches…"}
+          <p className="text-[12px] text-fg-3" aria-live="polite">
+            {branchError ? (
+              <>
+                <span className="text-warning">{branchError}</span>{" "}
+                <button type="button" onClick={reloadBranches} className="text-accent underline underline-offset-2">
+                  Try again
+                </button>
+              </>
+            ) : branches ? (
+              `${repositoryInfo?.private ? "Private" : "Public"} repository, reachable on GitHub · ${branches.list.length} branches${branches.truncated ? " (first 300 shown)" : ""}`
+            ) : (
+              "Checking the repository on GitHub…"
+            )}
           </p>
         </div>
         <div className="flex flex-col gap-1.5">
@@ -212,7 +275,7 @@ export function GitHubImportPanel({ apiUrl, defaultBranch, snapshotsHref }: { ap
         </button>
         <button type="button" onClick={runImport} disabled={busy || !commit} className={buttonClass("primary", "sm")}>
           {phase === "importing" ? <Spinner /> : <IconBranch size={14} />}
-          {phase === "importing" ? "Importing…" : "Import this commit"}
+          {phase === "importing" ? "Importing…" : result && !result.ok && result.code !== "duplicate" ? "Retry import" : "Import this commit"}
         </button>
       </div>
 
@@ -228,6 +291,11 @@ export function GitHubImportPanel({ apiUrl, defaultBranch, snapshotsHref }: { ap
           </a>
         </div>
       )}
+      {phase === "opening" && (
+        <p className="t-small flex items-center gap-2 text-fg-3" role="status">
+          <Spinner /> Imported. Opening the result…
+        </p>
+      )}
       {phase === "importing" && (
         <p className="t-small flex items-center gap-2 text-fg-3" role="status">
           <Spinner /> Downloading exactly this commit from GitHub, validating it and running the structure analysis. Keep this page open; it can take up to two minutes.
@@ -235,7 +303,7 @@ export function GitHubImportPanel({ apiUrl, defaultBranch, snapshotsHref }: { ap
       )}
       {error && <Alert tone="danger">{error}</Alert>}
       {result && !result.ok && (
-        <Alert tone="danger" title="Import failed">
+        <Alert tone={result.code === "duplicate" ? "info" : "danger"} title={result.code === "duplicate" ? "Already imported" : "Import failed"}>
           {result.error}
           {result.snapshotId && (
             <>
@@ -261,6 +329,49 @@ export function GitHubImportPanel({ apiUrl, defaultBranch, snapshotsHref }: { ap
             )}
           </span>
         </Alert>
+      )}
+    </div>
+  );
+}
+
+// "Import from GitHub" on the project page's repository card. The panel opens in place and only then talks to GitHub,
+// so viewing the project costs no GitHub requests. Reaching the page with #import-github (for example from the
+// Repository Intelligence empty state) opens it too.
+const IMPORT_HASH = "#import-github";
+
+export function GitHubImportLauncher(props: { apiUrl: string; defaultBranch: string; snapshotsHref: string; resultHref?: string }) {
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    const openFromHash = () => {
+      if (window.location.hash === IMPORT_HASH) setOpen(true);
+    };
+    window.addEventListener("hashchange", openFromHash);
+    const initial = window.setTimeout(openFromHash, 0);
+    return () => {
+      window.removeEventListener("hashchange", openFromHash);
+      window.clearTimeout(initial);
+    };
+  }, []);
+
+  return (
+    <div id={IMPORT_HASH.slice(1)} className="scroll-mt-24">
+      {open ? (
+        <div className="flex flex-col gap-3" role="region" aria-labelledby="github-import-title">
+          <div className="flex items-center justify-between gap-3">
+            <h3 id="github-import-title" className="text-[13.5px] font-semibold text-fg">
+              Import from GitHub
+            </h3>
+            <button type="button" onClick={() => setOpen(false)} aria-expanded="true" className={buttonClass("ghost", "sm")}>
+              Close
+            </button>
+          </div>
+          <GitHubImportPanel {...props} />
+        </div>
+      ) : (
+        <button type="button" onClick={() => setOpen(true)} aria-expanded="false" className={buttonClass("primary", "sm")}>
+          <IconBranch size={14} />
+          Import from GitHub
+        </button>
       )}
     </div>
   );
@@ -355,20 +466,33 @@ export function JiraProjectPicker({ apiUrl, action, selectedKey }: { apiUrl: str
 
 type SyncResponse = { ok: boolean; error?: string; outcome?: { status: "SUCCEEDED" | "PARTIAL" | "FAILED"; message: string } };
 
+// The server records every sync run (and its issues), so the page is reloaded with the outcome (router.refresh() was
+// not applied reliably on this Next.js version; see src/components/ui/reload.ts).
 export function JiraSyncButton({ apiUrl }: { apiUrl: string }) {
-  const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<SyncResponse | null>(null);
   const run = async () => {
     setBusy(true);
     setResult(null);
+    let reloading = false;
     try {
-      setResult(await postJson<SyncResponse>(apiUrl, { op: "sync" }));
-      router.refresh();
+      const body = await postJson<SyncResponse>(apiUrl, { op: "sync" });
+      setResult(body);
+      const outcome = body.outcome;
+      reloading = true;
+      reloadWithNotice(
+        outcome
+          ? {
+              tone: outcome.status === "SUCCEEDED" ? "success" : outcome.status === "PARTIAL" ? "warning" : "danger",
+              title: outcome.status === "SUCCEEDED" ? "Sync complete" : outcome.status === "PARTIAL" ? "Sync incomplete" : "Sync failed",
+              message: outcome.message,
+            }
+          : { tone: "danger", message: body.error ?? "The sync failed." },
+      );
     } catch (e) {
       setResult({ ok: false, error: e instanceof Error ? e.message : "The sync failed." });
     } finally {
-      setBusy(false);
+      if (!reloading) setBusy(false);
     }
   };
   const outcome = result?.outcome;

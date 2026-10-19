@@ -27,10 +27,20 @@ database can return it to that user would therefore also be readable from the br
    be decrypted. Enter it again." Nothing else breaks, and no data is lost.
 
 ## GitHub import
+### Where
+**Project page → Repository card → Import from GitHub** (OWNER/ADMIN, `github.com` repositories only). The Repository Intelligence
+empty state and header link to it (`#import-github`), and the same panel is on **Project → Integrations**. The panel opens in place and
+calls GitHub only when opened, so viewing a project costs no GitHub requests.
+
 ### Flow
 1. The project's repository must be a `github.com` repository (`https://github.com/<owner>/<name>`). If the project has none,
    an admin who saved a token can pick one from the repositories that token can read.
-2. **Branch:** the list comes from GitHub (at most 300 branches, flagged when truncated). The repository's default branch is preselected.
+2. **Check and branch:** opening the panel reads the repository on GitHub and records the result on the repository:
+   - readable: status **Connected** and GitHub's visibility (Public / Private / Internal);
+   - not found or not allowed: status **Error**, with a hint to add a token.
+   Status changes follow the existing repository lifecycle (Error goes back through Pending), using the caller's own client, so RLS
+   and the status trigger apply. Rate limits and timeouts change nothing. The branch list comes from GitHub (at most 300 branches,
+   flagged when truncated). The recorded default branch is preselected; if it does not exist on GitHub, GitHub's default branch is used.
 3. **Resolve commit:** leave the SHA empty for the branch's latest commit, or enter a full 40-character SHA. The server resolves it on
    GitHub and checks that the commit is on the branch, using the compare API (`identical` or `behind`). The page shows the SHA,
    message, date and a link to the commit on GitHub.
@@ -41,8 +51,15 @@ database can return it to that user would therefore also be readable from the br
    4. It ingests the archive through the same pipeline as an uploaded ZIP: validation, limits, exclusions, the signed manifest and
       the structure analysis.
    5. The source is recorded as `GITHUB_ARCHIVE` / `PROVIDER_FETCHED`. See [repository-ingestion.md](repository-ingestion.md).
-5. If the commit already has a COMPLETED snapshot, nothing new is created and the page links to that snapshot. A snapshot that is
-   PROCESSING is refused.
+5. If the commit already has a COMPLETED snapshot, nothing new is created and the panel shows "Already imported" with a link to that
+   snapshot. A snapshot that is PROCESSING is refused.
+6. **After a successful import** the browser loads `…/projects/<id>?imported=<snapshotId>#intelligence`. The project page confirms the
+   import from the database (snapshot status, file count, analysis status, links to the snapshot and graph); an id that is not a
+   snapshot of this repository is ignored. A full page load is used on purpose: on this Next.js version (16.2.9),
+   `router.refresh()` was observed to apply only some of the time (the refreshed RSC response was cancelled mid-stream and the page
+   kept the old server output), in headless and in regular Chromium, on pages unrelated to this feature too.
+7. **Failures** stay in the panel with the reason and a **Retry import** button. A snapshot created for a failed download stays
+   PENDING and is reused by the next attempt; an ingestion failure leaves it FAILED, as for uploads.
 
 The request stays open until processing ends (Route Handler, `maxDuration` 120 s). There is no background job.
 

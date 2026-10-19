@@ -6,13 +6,12 @@ import { IconArrowRight, IconLayers, IconPlus, IconUsers } from "@/components/ui
 import { PageBody, PageHeader } from "@/components/ui/page";
 import { StatusBadge } from "@/components/ui/status";
 import { requireUser } from "@/server/auth/session";
+import { can } from "@/lib/authz/permissions";
 import { idSchema } from "@/server/departments/schema";
 import { listDepartments } from "@/server/departments/queries";
 import { getMyOrganization } from "@/server/organizations/queries";
 
 export const metadata = { title: "Departments · OneForAll" };
-
-const CAN_MANAGE = ["OWNER", "ADMIN"];
 
 export default async function DepartmentsPage({ params }: PageProps<"/organizations/[organizationId]/departments">) {
   const { organizationId } = await params;
@@ -24,7 +23,7 @@ export default async function DepartmentsPage({ params }: PageProps<"/organizati
 
   const departments = await listDepartments(organization.id);
   // UI hint only. The database enforces who may actually create departments.
-  const canManage = CAN_MANAGE.includes(organization.role);
+  const canManage = can(organization.role, "hierarchy.manage");
   const newHref = `/organizations/${organization.id}/departments/new`;
   const members = departments.reduce((sum, d) => sum + d.memberCount, 0);
 
@@ -37,12 +36,21 @@ export default async function DepartmentsPage({ params }: PageProps<"/organizati
         description={`Organize engineering teams and ownership across ${organization.name}.`}
         badges={<StatusBadge kind="role" value={organization.role} label={`Your role: ${organization.role.charAt(0)}${organization.role.slice(1).toLowerCase()}`} />}
         actions={
-          canManage && (
-            <ButtonLink href={newHref} variant="primary">
-              <IconPlus size={15} />
-              New department
+          <>
+            <ButtonLink href={`/organizations/${organization.id}/members`} variant="secondary">
+              <IconUsers size={15} />
+              Members
             </ButtonLink>
-          )
+            <ButtonLink href={`/organizations/${organization.id}/workforce`} variant="secondary">
+              Workforce
+            </ButtonLink>
+            {canManage && (
+              <ButtonLink href={newHref} variant="primary">
+                <IconPlus size={15} />
+                New department
+              </ButtonLink>
+            )}
+          </>
         }
       />
 

@@ -1,6 +1,7 @@
 import "server-only";
 import { createClient } from "@/lib/supabase/server";
 import { ingestSnapshotArchive } from "@/server/repository-sources/ingestion";
+import { type RepositoryStatus, type Visibility, repositoryStatusSchema } from "@/server/repositories/schema";
 import { ARCHIVE_LIMITS } from "@/server/repository-sources/limits";
 import { snapshotBranchSchema } from "@/server/repository-snapshots/schema";
 import type { Database } from "@/types/database";
@@ -10,6 +11,7 @@ import { INTEGRATION_KEY_MISSING, getIntegrationKey } from "./integration-key";
 import { JiraClient, isJiraProjectKey, normalizeJiraSite } from "./jira";
 import { type SyncOutcome, runJiraSync } from "./jira-sync";
 import { ProviderError } from "./provider-http";
+import { REPOSITORY_ACCESS_FAILURES, gitHubVisibility, repositoryStatusSteps } from "./repository-state";
 
 // Project integrations: GitHub source import and Jira Cloud issue import. Server-only. Every function receives an
 // already verified project (organization -> department -> team -> project chain checked from the database by the
@@ -19,7 +21,16 @@ import { ProviderError } from "./provider-http";
 
 export type IntegrationKind = "GITHUB" | "JIRA";
 export type IntegrationRow = Database["public"]["Tables"]["project_integrations"]["Row"];
-type RepositoryRow = { id: string; provider: string; repository_url: string; owner: string; name: string; default_branch: string };
+type RepositoryRow = {
+  id: string;
+  provider: string;
+  repository_url: string;
+  owner: string;
+  name: string;
+  default_branch: string;
+  status: string;
+  visibility: string;
+};
 
 export type Result<T = object> = ({ ok: true } & T) | { ok: false; error: string; code?: string };
 
@@ -76,7 +87,8 @@ async function saveIntegration(
 async function readSecret(integration: IntegrationRow): Promise<string | null> {
   if (!integration.has_credential || integration.status === "DISCONNECTED") return null;
   const key = getIntegrationKey();
-  if (!key) throw new Error(INTEGRATION_KEY_MISSING);
+  // A stored credential cannot be used without the key; say so instead of a generic failure.
+  if (!key) throw new CredentialError(INTEGRATION_KEY_MISSING);
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("get_integration_ciphertext", { p_integration_id: integration.id });
   if (error) throw new Error("You do not have permission to use this integration.");
@@ -149,14 +161,54 @@ export async function removeGitHubToken(projectId: string): Promise<Result> {
   }
 }
 
+// Brings the project's repository record in line with what GitHub just answered (status through the existing
+// lifecycle, visibility from GitHub). Written with the caller's client, so RLS (OWNER/ADMIN) and the status trigger
+// apply; each step is a compare-and-set, so a concurrent change is never overwritten. Returns whether anything changed.
+async function setRepositoryState(repository: RepositoryRow, target: "CONNECTED" | "ERROR", visibility?: Visibility): Promise<boolean> {
+  const current = repositoryStatusSchema.safeParse(repository.status);
+  if (!current.success) return false;
+  const supabase = await createClient();
+  let status: RepositoryStatus = current.data;
+  let changed = false;
+  for (const next of repositoryStatusSteps(status, target)) {
+    const { data, error } = await supabase.from("repositories").update({ status: next }).eq("id", repository.id).eq("status", status).select("id");
+    if (error || data.length === 0) return changed;
+    status = next;
+    changed = true;
+  }
+  if (status === target && visibility && repository.visibility !== visibility) {
+    const { data, error } = await supabase.from("repositories").update({ visibility }).eq("id", repository.id).eq("status", status).select("id");
+    if (!error && data.length > 0) changed = true;
+  }
+  return changed;
+}
+
+// The import panel's first call: checks that the repository can be read on GitHub (and records the result on the
+// repository: CONNECTED with GitHub's visibility, or ERROR when it is not found or not allowed), then lists branches.
 export async function listGitHubBranches(projectId: string, repository: RepositoryRow | null) {
   const target = gitHubTargetOf(repository);
-  if (!target) return { ok: false as const, error: "Connect a GitHub repository (https://github.com/owner/name) to this project first." };
+  if (!repository || !target) return { ok: false as const, error: "Connect a GitHub repository (https://github.com/owner/name) to this project first." };
+  let client: GitHubClient;
   try {
-    const { client } = await gitHubClientFor(projectId);
-    return { ok: true as const, ...(await client.listBranches(target)) };
+    client = (await gitHubClientFor(projectId)).client;
   } catch (error) {
     return { ok: false as const, ...providerMessage(error) };
+  }
+  let info;
+  try {
+    info = await client.getRepository(target);
+  } catch (error) {
+    const failure = providerMessage(error);
+    const permanent = error instanceof ProviderError && REPOSITORY_ACCESS_FAILURES.has(error.code);
+    const repositoryChanged = permanent ? await setRepositoryState(repository, "ERROR") : false;
+    return { ok: false as const, ...failure, repositoryChanged };
+  }
+  const repositoryChanged = await setRepositoryState(repository, "CONNECTED", gitHubVisibility(info));
+  try {
+    const list = await client.listBranches(target);
+    return { ok: true as const, ...list, defaultBranch: info.defaultBranch, private: info.private, repositoryChanged };
+  } catch (error) {
+    return { ok: false as const, ...providerMessage(error), repositoryChanged };
   }
 }
 
@@ -247,6 +299,8 @@ export async function importGitHubCommit(projectId: string, repository: Reposito
     return { ok: false, error: result.error, snapshotId, changed: result.changed };
   }
   await recordResult(integrationId, true, result.analysisError ? "PARTIAL" : "SUCCEEDED", `Imported ${sha.slice(0, 12)} from ${branch}. ${result.message}`);
+  // GitHub served this repository's archive, so the repository is reachable.
+  await setRepositoryState(repository, "CONNECTED");
   return { ok: true, snapshotId, message: result.message, analysisError: result.analysisError, changed: true };
 }
 

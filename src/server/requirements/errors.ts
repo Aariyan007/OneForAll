@@ -12,6 +12,9 @@ export function toErrorMessage(error: { code?: string; message: string }): strin
       return error.message.includes("status transition")
         ? "That status change is not allowed."
         : "Some of the submitted values are not valid.";
+    case "55000":
+      // Raised by our own lifecycle rules with a readable message (e.g. open tasks block completing a requirement).
+      return error.message;
     default:
       return GENERIC_MESSAGE;
   }

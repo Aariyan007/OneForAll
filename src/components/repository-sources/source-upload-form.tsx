@@ -4,6 +4,7 @@ import { useActionState, useState, type FormEvent } from "react";
 import { Alert } from "@/components/ui/alert";
 import { Spinner, buttonClass } from "@/components/ui/button";
 import { IconFileCode, IconPlus } from "@/components/ui/icons";
+import { useReloadOnSuccess } from "@/components/ui/reload";
 import { SMALLER_ARCHIVE_TIPS, type SelectedFile, formatBytes, validateArchiveSelection } from "@/lib/repository-sources/upload";
 import type { SourceUploadState } from "@/server/repository-sources/actions";
 
@@ -117,10 +118,13 @@ export function SourceUploadForm({ uploadUrl, label, maxBytes, hint }: { uploadU
 }
 
 export function MarkFailedForm({ action }: { action: UploadAction }) {
+  // On success the page is reloaded with the message (the action does not revalidate; see src/components/ui/reload.ts).
+  // The Server Action is used directly, so the form also works without JavaScript.
   const [state, formAction, pending] = useActionState<SourceUploadState, FormData>(action, {});
+  const leaving = useReloadOnSuccess(state);
   return (
     <form action={formAction} className="flex flex-col gap-2">
-      <button type="submit" disabled={pending} className={buttonClass("secondary", "sm", "w-fit")}>
+      <button type="submit" disabled={pending || leaving} className={buttonClass("secondary", "sm", "w-fit")}>
         {pending && <Spinner />}
         Mark as failed
       </button>

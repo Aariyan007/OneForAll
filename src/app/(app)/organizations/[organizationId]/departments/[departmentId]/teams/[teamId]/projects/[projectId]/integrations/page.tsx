@@ -119,7 +119,12 @@ export default async function IntegrationsPage({
               />
               <div className="flex flex-col gap-4 border-t border-border px-5 py-4">
                 {gitHubTarget && canManage && (
-                  <GitHubImportPanel apiUrl={`${base}/github`} defaultBranch={repository!.default_branch} snapshotsHref={`${projectPath}/repository/snapshots`} />
+                  <GitHubImportPanel
+                    apiUrl={`${base}/github`}
+                    defaultBranch={repository!.default_branch}
+                    snapshotsHref={`${projectPath}/repository/snapshots`}
+                    resultHref={`${projectPath}?imported={snapshotId}#intelligence`}
+                  />
                 )}
                 {gitHubTarget && !canManage && <p className="t-small text-fg-3">Only organization owners and admins can import source.</p>}
                 {!repository && canManage && github?.has_credential && (
@@ -153,7 +158,7 @@ export default async function IntegrationsPage({
                       <ActionForm action={removeGitHubTokenAction.bind(null, ...ids)} submitLabel="Remove token" pendingLabel="Removing…" variant="secondary" confirm="Remove the saved GitHub token?" />
                     )}
                     {gitHubTarget && !github?.has_credential && (
-                      <ActionForm action={checkGitHubAccessAction.bind(null, ...ids)} submitLabel="Check public access" pendingLabel="Checking…" variant="secondary" />
+                      <ActionForm action={checkGitHubAccessAction.bind(null, ...ids)} submitLabel="Check public access" pendingLabel="Checking…" variant="secondary" reloadOnSuccess={false} />
                     )}
                   </>
                 ) : (

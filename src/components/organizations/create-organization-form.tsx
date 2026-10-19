@@ -1,15 +1,30 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState } from "react";
+import { useActionState, useEffect } from "react";
 import { Alert } from "@/components/ui/alert";
 import { FormField } from "@/components/ui/form-field";
+import { navigateWithNotice } from "@/components/ui/reload";
 import { FormActions, SubmitButton } from "@/components/ui/submit-button";
 import { createOrganization } from "@/server/organizations/actions";
 import type { CreateOrganizationState } from "@/server/organizations/schema";
 
 export function CreateOrganizationForm() {
+  // On success the new organization opens with a full page load, so the sidebar and its pages come from the server
+  // (the action does not revalidate; see src/components/ui/reload.ts).
+  // The Server Action is used directly, so the form also works without JavaScript (the "Created" alert links on).
   const [state, formAction, pending] = useActionState<CreateOrganizationState, FormData>(createOrganization, {});
+  const created = state.organization;
+  useEffect(() => {
+    if (created) {
+      navigateWithNotice(`/organizations/${created.id}/departments`, {
+        tone: "success",
+        title: `Created ${created.name}`,
+        message: `Slug ${created.slug} · your role: ${created.role}.`,
+      });
+    }
+  }, [created]);
+  const leaving = Boolean(created);
 
   return (
     <div className="flex flex-col gap-5">
@@ -32,7 +47,7 @@ export function CreateOrganizationForm() {
         />
         {state.error && <Alert tone="danger">{state.error}</Alert>}
         <FormActions>
-          <SubmitButton pending={pending} pendingLabel="Creating…">
+          <SubmitButton pending={pending || leaving} pendingLabel="Creating…">
             Create organization
           </SubmitButton>
         </FormActions>

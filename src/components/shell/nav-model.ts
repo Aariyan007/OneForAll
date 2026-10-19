@@ -43,6 +43,10 @@ export function paths(ctx: RouteContext) {
   const team = dept && ctx.teamId ? `${dept}/teams/${ctx.teamId}` : undefined;
   const project = team && ctx.projectId ? `${team}/projects/${ctx.projectId}` : undefined;
   return {
+    orgOverview: org ? `${org}/overview` : undefined,
+    settings: org ? `${org}/settings` : undefined,
+    members: org ? `${org}/members` : undefined,
+    workforce: org ? `${org}/workforce` : undefined,
     departments: org ? `${org}/departments` : undefined,
     teams: dept ? `${dept}/teams` : undefined,
     projects: team ? `${team}/projects` : undefined,
@@ -51,22 +55,30 @@ export function paths(ctx: RouteContext) {
   };
 }
 
-export function buildNav(ctx: RouteContext): NavSection[] {
+// `role` is the caller's role in the current organization, for display only: every destination checks access itself.
+export function buildNav(ctx: RouteContext, role?: string): NavSection[] {
   const p = paths(ctx);
+  const manager = role === "OWNER" || role === "ADMIN";
   return [
     {
       title: "General",
       items: [
         { key: "dashboard", label: "Dashboard", href: "/dashboard", icon: "dashboard", match: "exact" },
+        { key: "my-work", label: "My work", href: "/my-work", icon: "task", match: "exact" },
+        { key: "notifications", label: "Notifications", href: "/notifications", icon: "bell", match: "exact" },
         { key: "organizations", label: "Organizations", href: "/organizations/new", icon: "building", match: "exact" },
       ],
     },
     {
       title: "Workspace",
       items: [
+        { key: "org-overview", label: "Overview", href: p.orgOverview, icon: "building", hint: "Open an organization", match: "exact" },
+        { key: "members", label: "Members", href: p.members, icon: "users", hint: "Open an organization", match: "exact" },
+        { key: "workforce", label: "Workforce", href: p.workforce, icon: "sparkle", hint: "Open an organization", match: "prefix" },
         { key: "departments", label: "Departments", href: p.departments, icon: "layers", hint: "Open an organization", match: "exact" },
         { key: "teams", label: "Teams", href: p.teams, icon: "users", hint: "Open a department", match: "exact" },
         { key: "projects", label: "Projects", href: p.projects, icon: "folder", hint: "Open a team", match: "exact" },
+        ...(ctx.organizationId && !manager ? [] : [{ key: "settings", label: "Settings", href: p.settings, icon: "settings", hint: "Open an organization", match: "exact" as const }]),
       ],
     },
     {
@@ -76,7 +88,6 @@ export function buildNav(ctx: RouteContext): NavSection[] {
         { key: "requirements", label: "Requirements", href: p.requirements, icon: "listChecks", hint: "Open a project", match: "prefix" },
         { key: "repository", label: "Repository", href: p.project ? `${p.project}#repository` : undefined, icon: "branch", hint: "Open a project" },
         { key: "intelligence", label: "Engineering Intelligence", href: p.project ? `${p.project}#intelligence` : undefined, icon: "network", hint: "Open a project" },
-        { key: "tasks", label: "Tasks", icon: "task", soon: true, hint: "Tasks live inside each requirement" },
       ],
     },
   ];

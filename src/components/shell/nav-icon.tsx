@@ -1,4 +1,5 @@
 import {
+  IconBell,
   IconBox,
   IconBranch,
   IconBuilding,
@@ -8,6 +9,7 @@ import {
   IconListChecks,
   IconNetwork,
   IconSettings,
+  IconSparkle,
   IconTask,
   IconUsers,
 } from "@/components/ui/icons";
@@ -24,6 +26,8 @@ const ICONS = {
   network: IconNetwork,
   task: IconTask,
   settings: IconSettings,
+  bell: IconBell,
+  sparkle: IconSparkle,
 } as const;
 
 export function NavIcon({ name, size = 16 }: { name: string; size?: number }) {

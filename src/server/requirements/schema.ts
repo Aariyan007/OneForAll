@@ -37,6 +37,8 @@ export function isAllowedRequirementTransition(from: RequirementStatus, to: Requ
 
 export type WorkItemFormState = {
   error?: string;
+  // Page to open after success (server-built from verified ids); see src/components/ui/reload.ts.
+  redirectTo?: string;
   fieldErrors?: { title?: string[]; description?: string[]; priority?: string[] };
 };
 

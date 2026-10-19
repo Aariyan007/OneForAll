@@ -4,11 +4,15 @@ import { Card, CardHeader } from "@/components/ui/card";
 import { EmptyState, KeyValueList } from "@/components/ui/data";
 import { IconListChecks, IconPlus, IconTask } from "@/components/ui/icons";
 import { PageBody, PageHeader, SectionHeader } from "@/components/ui/page";
+import { RequirementStatusActions } from "@/components/work-items/requirement-status";
+import { REQUIREMENT_STATUSES, type RequirementStatus } from "@/server/requirements/schema";
 import { PriorityBadge, StatusBadge, humanize, toneFor } from "@/components/ui/status";
 import { getMyRequirement, getProjectContext } from "@/server/requirements/queries";
 import { TASK_STATUSES } from "@/server/tasks/schema";
 import { listTasks } from "@/server/tasks/queries";
+import Link from "next/link";
 import { cx } from "@/lib/cx";
+import { TASK_STATUS_LABELS } from "@/lib/tasks/workflow";
 
 export const metadata = { title: "Requirement · OneForAll" };
 
@@ -17,6 +21,8 @@ const COLUMN_ACCENT: Record<string, string> = {
   accent: "bg-accent",
   success: "bg-success",
   muted: "bg-border-strong",
+  danger: "bg-danger",
+  info: "bg-info",
 };
 
 export default async function RequirementPage({
@@ -95,24 +101,31 @@ export default async function RequirementPage({
                 }
               />
             ) : (
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                 {TASK_STATUSES.map((status) => {
                   const column = tasks.filter((task) => task.status === status);
                   return (
                     <div key={status} className="flex min-w-0 flex-col rounded-xl border border-border bg-bg-subtle/60">
                       <div className="flex items-center gap-2 px-3 py-2.5">
                         <span className={cx("size-2 rounded-full", COLUMN_ACCENT[toneFor("task", status)] ?? "bg-fg-3")} />
-                        <span className="text-[12.5px] font-medium text-fg-2">{humanize(status)}</span>
+                        <span className="text-[12.5px] font-medium text-fg-2">{TASK_STATUS_LABELS[status] ?? humanize(status)}</span>
                         <span className="ml-auto rounded bg-surface-3 px-1.5 text-[11px] tabular-nums text-fg-3">{column.length}</span>
                       </div>
                       <ul className="flex flex-col gap-2 px-2 pb-2">
                         {column.length === 0 && <li className="rounded-lg border border-dashed border-border px-3 py-4 text-center text-[12px] text-fg-3">No tasks</li>}
                         {column.map((task) => (
-                          <li key={task.id} className="rounded-lg border border-border bg-surface p-3 shadow-1 transition-colors hover:border-border-strong">
-                            <p className="text-[13px] font-medium leading-snug text-fg">{task.title}</p>
-                            <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-                              <PriorityBadge value={task.priority} />
-                            </div>
+                          <li key={task.id}>
+                            <Link
+                              href={`${base}/${requirement.id}/tasks/${task.id}`}
+                              className="block rounded-lg border border-border bg-surface p-3 shadow-1 transition-colors hover:border-border-strong focus-visible:outline-2 focus-visible:outline-accent"
+                            >
+                              <p className="text-[13px] font-medium leading-snug text-fg">{task.title}</p>
+                              <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+                                <PriorityBadge value={task.priority} />
+                                <span className="text-[11.5px] text-fg-3">{task.assigneeName ?? "Unassigned"}</span>
+                                {task.due_date && <span className="text-[11.5px] text-fg-3">· due {task.due_date}</span>}
+                              </div>
+                            </Link>
                           </li>
                         ))}
                       </ul>
@@ -125,6 +138,18 @@ export default async function RequirementPage({
         </div>
 
         <aside className="grid h-fit gap-3 sm:grid-cols-2 xl:flex xl:flex-col">
+          {canManage && isRequirementStatus(requirement.status) && (
+            <Card>
+              <CardHeader title="Requirement status" description="Release readiness: complete it when every task is done." />
+              <div className="px-5 py-4">
+                <RequirementStatusActions
+                  ids={{ organizationId: organization.id, departmentId: department.id, teamId: team.id, projectId: project.id, requirementId: requirement.id }}
+                  status={requirement.status}
+                  openTasks={tasks.filter((t) => t.status !== "COMPLETED" && t.status !== "CANCELLED").length}
+                />
+              </div>
+            </Card>
+          )}
           <Card>
             <CardHeader title="Details" />
             <div className="px-5 py-4">
@@ -156,4 +181,8 @@ export default async function RequirementPage({
       </div>
     </PageBody>
   );
+}
+
+function isRequirementStatus(value: string): value is RequirementStatus {
+  return (REQUIREMENT_STATUSES as readonly string[]).includes(value);
 }

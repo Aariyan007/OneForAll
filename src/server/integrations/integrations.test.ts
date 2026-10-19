@@ -8,6 +8,8 @@ import { GitHubClient, gitHubRepoFromUrl, parseGitHubRepo } from "./github";
 import { JiraClient, type JiraIssue, mapJiraIssue, normalizeJiraSite } from "./jira";
 import { runJiraSync } from "./jira-sync";
 import { type FetchLike, ProviderError, isPrivateAddress, providerRequest } from "./provider-http";
+import { REPOSITORY_ACCESS_FAILURES, gitHubVisibility, repositoryStatusSteps } from "./repository-state";
+import { REPOSITORY_STATUSES, isAllowedRepositoryTransition } from "../repositories/schema";
 
 const KEY = "unit-test-integration-key-0123456789abcdef";
 const OTHER_KEY = "another-unit-test-integration-key-987654321";
@@ -217,8 +219,57 @@ describe("GitHub client", () => {
     await assert.rejects(new GitHubClient(null, big).downloadArchive(repo, "not-a-sha", 1024), ProviderError);
   });
 
+  it("reads the repository's visibility and default branch", async () => {
+    const f = fakeFetch(() => json({ full_name: "octo-org/app.repo", owner: { login: "octo-org" }, name: "app.repo", private: true, visibility: "internal", default_branch: "trunk", html_url: "https://github.com/octo-org/app.repo" }));
+    const info = await new GitHubClient(null, f).getRepository(repo);
+    assert.equal(info.visibility, "internal");
+    assert.equal(info.defaultBranch, "trunk");
+    assert.equal(new URL(f.calls[0].url).pathname, "/repos/octo-org/app.repo");
+    const old = fakeFetch(() => json({ full_name: "a/b", owner: { login: "a" }, name: "b", private: false, default_branch: "main", html_url: "" }));
+    assert.equal((await new GitHubClient(null, old).getRepository(repo)).visibility, undefined);
+  });
+
   it("listing repositories needs a token", async () => {
     await assert.rejects(new GitHubClient(null, fakeFetch(() => json([]))).listAccessibleRepositories(), (e: unknown) => e instanceof ProviderError && e.code === "unauthorized");
+  });
+});
+
+describe("repository record after a GitHub check", () => {
+  it("maps GitHub visibility, falling back to the private flag", () => {
+    assert.equal(gitHubVisibility({ private: false, visibility: "public" }), "PUBLIC");
+    assert.equal(gitHubVisibility({ private: true, visibility: "private" }), "PRIVATE");
+    assert.equal(gitHubVisibility({ private: true, visibility: "internal" }), "INTERNAL");
+    assert.equal(gitHubVisibility({ private: true }), "PRIVATE");
+    assert.equal(gitHubVisibility({ private: false, visibility: "something-new" }), "PUBLIC");
+  });
+
+  it("reaches CONNECTED or ERROR only through allowed lifecycle transitions", () => {
+    assert.deepEqual(repositoryStatusSteps("PENDING", "CONNECTED"), ["CONNECTED"]);
+    assert.deepEqual(repositoryStatusSteps("ERROR", "CONNECTED"), ["PENDING", "CONNECTED"]);
+    assert.deepEqual(repositoryStatusSteps("CONNECTED", "CONNECTED"), []);
+    assert.deepEqual(repositoryStatusSteps("PENDING", "ERROR"), ["ERROR"]);
+    assert.deepEqual(repositoryStatusSteps("CONNECTED", "ERROR"), ["ERROR"]);
+    assert.deepEqual(repositoryStatusSteps("ERROR", "ERROR"), []);
+    // A disconnected record is never revived or changed by a check.
+    assert.deepEqual(repositoryStatusSteps("DISCONNECTED", "CONNECTED"), []);
+    assert.deepEqual(repositoryStatusSteps("DISCONNECTED", "ERROR"), []);
+    for (const from of REPOSITORY_STATUSES) {
+      for (const target of ["CONNECTED", "ERROR"] as const) {
+        let at = from;
+        for (const next of repositoryStatusSteps(from, target)) {
+          assert.ok(isAllowedRepositoryTransition(at, next), `${at} -> ${next}`);
+          at = next;
+        }
+        if (from !== "DISCONNECTED") assert.equal(at, target, `${from} ends at ${target}`);
+      }
+    }
+  });
+
+  it("marks the repository as failed only for access failures, never for temporary ones", () => {
+    for (const code of ["not_found", "unauthorized", "forbidden"]) assert.ok(REPOSITORY_ACCESS_FAILURES.has(code), code);
+    for (const code of ["rate_limited", "timeout", "network", "bad_response", "too_large", "conflict", "invalid_request"]) {
+      assert.ok(!REPOSITORY_ACCESS_FAILURES.has(code), code);
+    }
   });
 });
 

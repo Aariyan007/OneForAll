@@ -3,7 +3,8 @@ import { NextResponse, type NextRequest } from "next/server";
 import { publicEnv } from "@/lib/env";
 import type { Database } from "@/types/database";
 
-const PUBLIC_PATHS = ["/", "/login", "/signup", "/auth"];
+// /invitations is public: it explains the invitation and offers sign-in; accepting still requires a session.
+const PUBLIC_PATHS = ["/", "/login", "/signup", "/auth", "/invitations"];
 
 function isPublicPath(pathname: string) {
   return PUBLIC_PATHS.some(

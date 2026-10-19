@@ -1,19 +1,13 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { requireUser } from "@/server/auth/session";
 import { idSchema } from "@/server/departments/schema";
 import { GENERIC_MESSAGE, PERMISSION_MESSAGE, toErrorMessage } from "@/server/requirements/errors";
-import {
-  type TaskActionResult,
-  type TaskFormState,
-  isAllowedTaskTransition,
-  taskFieldsSchema,
-  taskStatusSchema,
-} from "./schema";
+import { rpcErrorMessage } from "@/server/errors";
+import { type TaskActionResult, type TaskFormState, taskFieldsSchema, taskStatusSchema } from "./schema";
 
 // Every action verifies the session server-side, validates input, then lets the database
 // (RLS, constraints and the lifecycle trigger) decide. Ids from the browser are only targets,
@@ -66,8 +60,8 @@ export async function createTask(
   });
   if (error) return { error: toErrorMessage(error) };
 
-  revalidatePath(requirementPath(ids.data));
-  redirect(requirementPath(ids.data));
+  // No redirect(): the form opens this page with a full load (see src/components/ui/reload.ts).
+  return { redirectTo: requirementPath(ids.data) };
 }
 
 export async function updateTask(
@@ -109,6 +103,7 @@ export async function updateTaskStatus(
   requirementId: string,
   taskId: string,
   status: string,
+  reason = "",
 ): Promise<TaskActionResult> {
   await requireUser();
 
@@ -117,33 +112,19 @@ export async function updateTaskStatus(
   if (!ids.success) return { error: "Invalid task." };
   if (!next.success) return { error: "Invalid status." };
 
+  // Since migration 20261024000001 status changes go through transition_task(), which checks who may take the step
+  // (assignee or OWNER/ADMIN), dependencies and required reasons, and logs the change.
   const supabase = await createClient();
-  const { data: current, error: readError } = await supabase
+  const { data: task, error: readError } = await supabase
     .from("tasks")
-    .select("status")
+    .select("id")
     .eq("id", ids.data.taskId)
     .eq("requirement_id", ids.data.requirementId)
     .maybeSingle();
   if (readError) return { error: toErrorMessage(readError) };
-  if (!current) return { error: PERMISSION_MESSAGE };
-
-  const from = taskStatusSchema.safeParse(current.status);
-  if (!from.success) return { error: GENERIC_MESSAGE };
-  if (from.data === next.data) return {};
-  if (!isAllowedTaskTransition(from.data, next.data)) {
-    return { error: `A ${from.data} task cannot move to ${next.data}.` };
-  }
-
-  // `.eq("status", from)` makes the change a compare-and-set, so a concurrent change is not overwritten.
-  const { data, error } = await supabase
-    .from("tasks")
-    .update({ status: next.data })
-    .eq("id", ids.data.taskId)
-    .eq("requirement_id", ids.data.requirementId)
-    .eq("status", from.data)
-    .select("id");
-  if (error) return { error: toErrorMessage(error) };
-  if (data.length === 0) return { error: PERMISSION_MESSAGE };
+  if (!task) return { error: PERMISSION_MESSAGE };
+  const { error } = await supabase.rpc("transition_task", { p_task_id: task.id, p_status: next.data, p_reason: reason.trim() || undefined });
+  if (error) return { error: rpcErrorMessage(error, GENERIC_MESSAGE) };
 
   revalidatePath(requirementPath(ids.data));
   return {};

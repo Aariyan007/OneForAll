@@ -367,7 +367,9 @@ begin
   select count(*) into n from public.repositories where project_id = p_a2; assert n = 0, 'deleting a department cascades down to repositories';
   select count(*) into n from public.repositories where id = rp_bb; assert n = 1, 'other organization untouched by cascade';
   delete from public.organizations where id = org2;
-  select count(*) into n from public.repositories; assert n = 0, 'deleting an organization cascades all the way to repositories';
+  -- Only this suite's repositories: the local database may hold real ones.
+  select count(*) into n from public.repositories where created_by in (owner1, admin1, ma, mb, mdept, mx, mo, owner2, m2);
+  assert n = 0, 'deleting an organization cascades all the way to repositories';
 
   raise notice 'ALL REPOSITORY CHECKS PASSED';
 end;

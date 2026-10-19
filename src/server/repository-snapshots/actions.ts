@@ -1,7 +1,6 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { requireUser } from "@/server/auth/session";
@@ -79,9 +78,9 @@ export async function createSnapshot(
   });
   if (error) return { error: toErrorMessage(error) };
 
-  revalidateSnapshots(ids.data);
-  // Straight to the new snapshot, where its source archive is uploaded.
-  redirect(repositoryPath(ids.data) + "/snapshots" + (data[0] ? `/${data[0].id}` : ""));
+  // Straight to the new snapshot, where its source archive is uploaded. No redirect(): the form opens it with a full
+  // load (see src/components/ui/reload.ts).
+  return { redirectTo: repositoryPath(ids.data) + "/snapshots" + (data[0] ? `/${data[0].id}` : "") };
 }
 
 // Removes the snapshot together with its file manifest (cascade). There is no soft delete.

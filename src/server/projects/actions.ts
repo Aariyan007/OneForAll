@@ -1,7 +1,6 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { requireUser } from "@/server/auth/session";
@@ -71,8 +70,8 @@ export async function createProject(
   });
   if (error) return { error: toErrorMessage(error) };
 
-  revalidatePath(projectsPath(ids.data));
-  redirect(projectsPath(ids.data));
+  // No redirect(): the form opens this page with a full load (see src/components/ui/reload.ts).
+  return { redirectTo: projectsPath(ids.data) };
 }
 
 export async function updateProject(

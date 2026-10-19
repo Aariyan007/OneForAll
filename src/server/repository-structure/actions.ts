@@ -71,10 +71,10 @@ export async function analyzeStructure(
   if (!repository) return { error: PERMISSION_MESSAGE };
 
   const outcome = await analyzeSnapshot(ids.data.snapshotId, repository.id, getSourceProvider());
-  revalidateProject(ids.data);
+  // No revalidatePath: AnalyzeStructureForm reloads the page instead (see src/components/ui/reload.ts).
   // A recorded failure is shown from the analysis itself (status FAILED + message); only an unrecorded one is an action error.
   if (!outcome.ok && !outcome.recorded) return { error: outcome.error };
-  return {};
+  return { success: outcome.ok ? "Structure analysis completed." : "The analysis finished with an error; see the analysis status." };
 }
 
 // Deleting an analysis removes its symbols and relationships (cascade). It is the explicit, authorized way to

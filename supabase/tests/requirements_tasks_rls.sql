@@ -288,7 +288,7 @@ begin
   begin insert into public.tasks (requirement_id,title,created_by) values ('00000000-0000-0000-0000-00000000ffff','X',owner1); exception when foreign_key_violation then caught := true; end;
   assert caught, 'task must reference an existing requirement (FK)';
   caught := false;
-  begin insert into public.tasks (requirement_id,title,status,created_by) values (rq_a,'S','BLOCKED',owner1); exception when check_violation then caught := true; end;
+  begin insert into public.tasks (requirement_id,title,status,created_by) values (rq_a,'S','ARCHIVED',owner1); exception when check_violation then caught := true; end;
   assert caught, 'invalid task status rejected by CHECK';
   caught := false;
   begin insert into public.tasks (requirement_id,title,created_by) values (rq_a,'  ',owner1); exception when check_violation then caught := true; end;
@@ -331,8 +331,9 @@ begin
   perform set_config('request.jwt.claims', json_build_object('sub',ma,'role','authenticated')::text, true);
   update public.tasks set title = 'Member edit' where id = tk_a;
   get diagnostics n = row_count; assert n = 0, 'team MEMBER must not update task';
-  update public.tasks set status = 'IN_PROGRESS' where id = tk_a;
-  get diagnostics n = row_count; assert n = 0, 'team MEMBER must not change task status';
+  -- Since migration 20261024000001 status changes only through transition_task(): no client UPDATE on status.
+  caught := false; begin update public.tasks set status = 'IN_PROGRESS' where id = tk_a; exception when insufficient_privilege then caught := true; end;
+  assert caught, 'team MEMBER must not change task status';
   delete from public.tasks where id = tk_a;
   get diagnostics n = row_count; assert n = 0, 'team MEMBER must not delete task';
   perform set_config('request.jwt.claims', json_build_object('sub',mb,'role','authenticated')::text, true);
@@ -359,29 +360,35 @@ begin
   assert caught, 'task id is immutable';
 
   ---------------------------------------------------------------- TASKS: lifecycle, every (from, to) pair
+  -- Since migration 20261024000001 clients (even OWNERs) change status only through transition_task(), which is tested
+  -- with its actor rules in task_workflow_rls.sql. The lifecycle trigger itself is checked here for every pair.
   select id into tk from public.create_task(rq_a, 'Lifecycle task');
+  caught := false; begin update public.tasks set status = 'IN_PROGRESS' where id = tk; exception when insufficient_privilege then caught := true; end;
+  assert caught, 'OWNER cannot bypass transition_task() with a direct status update';
+  reset role;
   for v in
     select f, t, ok from (values
-      ('TODO','TODO',true),('TODO','IN_PROGRESS',true),('TODO','COMPLETED',false),('TODO','CANCELLED',true),
-      ('IN_PROGRESS','TODO',true),('IN_PROGRESS','IN_PROGRESS',true),('IN_PROGRESS','COMPLETED',true),('IN_PROGRESS','CANCELLED',true),
-      ('COMPLETED','TODO',false),('COMPLETED','IN_PROGRESS',true),('COMPLETED','COMPLETED',true),('COMPLETED','CANCELLED',false),
-      ('CANCELLED','TODO',true),('CANCELLED','IN_PROGRESS',false),('CANCELLED','COMPLETED',false),('CANCELLED','CANCELLED',true)
+      ('TODO','TODO',true),('TODO','IN_PROGRESS',true),('TODO','BLOCKED',false),('TODO','IN_REVIEW',false),('TODO','COMPLETED',false),('TODO','CANCELLED',true),
+      ('IN_PROGRESS','TODO',true),('IN_PROGRESS','IN_PROGRESS',true),('IN_PROGRESS','BLOCKED',true),('IN_PROGRESS','IN_REVIEW',true),('IN_PROGRESS','COMPLETED',true),('IN_PROGRESS','CANCELLED',true),
+      ('BLOCKED','TODO',false),('BLOCKED','IN_PROGRESS',true),('BLOCKED','BLOCKED',true),('BLOCKED','IN_REVIEW',false),('BLOCKED','COMPLETED',false),('BLOCKED','CANCELLED',true),
+      ('IN_REVIEW','TODO',false),('IN_REVIEW','IN_PROGRESS',true),('IN_REVIEW','BLOCKED',false),('IN_REVIEW','IN_REVIEW',true),('IN_REVIEW','COMPLETED',true),('IN_REVIEW','CANCELLED',true),
+      ('COMPLETED','TODO',false),('COMPLETED','IN_PROGRESS',true),('COMPLETED','BLOCKED',false),('COMPLETED','IN_REVIEW',false),('COMPLETED','COMPLETED',true),('COMPLETED','CANCELLED',false),
+      ('CANCELLED','TODO',true),('CANCELLED','IN_PROGRESS',false),('CANCELLED','BLOCKED',false),('CANCELLED','IN_REVIEW',false),('CANCELLED','COMPLETED',false),('CANCELLED','CANCELLED',true)
     ) as x(f, t, ok)
   loop
-    reset role;
     set local session_replication_role = replica;
     update public.tasks set status = v.f where id = tk;
     set local session_replication_role = origin;
-    set local role authenticated;
-    perform set_config('request.jwt.claims', json_build_object('sub',owner1,'role','authenticated')::text, true);
     caught := false;
     begin update public.tasks set status = v.t where id = tk; exception when check_violation then caught := true; end;
     assert caught = not v.ok, format('task transition %s -> %s: expected %s', v.f, v.t, case when v.ok then 'allowed' else 'rejected' end);
     select status into r from public.tasks where id = tk;
     assert r.status = case when v.ok then v.t else v.f end, format('task %s -> %s left wrong status %s', v.f, v.t, r.status);
   end loop;
-  caught := false; begin update public.tasks set status = 'BLOCKED' where id = tk; exception when check_violation then caught := true; end;
+  caught := false; begin update public.tasks set status = 'ARCHIVED' where id = tk; exception when check_violation then caught := true; end;
   assert caught, 'unknown task status rejected on update';
+  set local role authenticated;
+  perform set_config('request.jwt.claims', json_build_object('sub',owner1,'role','authenticated')::text, true);
 
   ---------------------------------------------------------------- access follows team membership (derived through project)
   reset role;

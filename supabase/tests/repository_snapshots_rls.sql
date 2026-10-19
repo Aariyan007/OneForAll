@@ -589,8 +589,12 @@ begin
   select count(*) into n from public.repository_snapshots where id = s_bb; assert n = 0, 'deleting a team cascades down to snapshots';
   select count(*) into n from public.repository_files where id = f_bb; assert n = 0, '...and files';
   delete from public.organizations where id = org1;
-  select count(*) into n from public.repository_snapshots; assert n = 0, 'deleting an organization cascades all the way to snapshots';
-  select count(*) into n from public.repository_files; assert n = 0, '...and files';
+  -- Only this suite's snapshots: the local database may hold real ones.
+  select count(*) into n from public.repository_snapshots where repository_id in (repo_a, repo_b, repo_bb, repo_empty);
+  assert n = 0, 'deleting an organization cascades all the way to snapshots';
+  select count(*) into n from public.repository_files f join public.repository_snapshots rs on rs.id = f.snapshot_id
+  where rs.repository_id in (repo_a, repo_b, repo_bb, repo_empty);
+  assert n = 0, '...and files';
 
   raise notice 'ALL SNAPSHOT AND FILE CHECKS PASSED';
 end;

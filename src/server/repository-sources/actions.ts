@@ -1,10 +1,9 @@
 "use server";
 
-import { redirect } from "next/navigation";
 import { requireUser } from "@/server/auth/session";
 import { PERMISSION_MESSAGE } from "@/server/requirements/errors";
 import { failStaleSnapshot } from "./ingestion";
-import { resolveSnapshotTarget, revalidateSnapshotPages, snapshotPath } from "./target";
+import { resolveSnapshotTarget } from "./target";
 
 // Snapshot Server Actions. Source-archive uploads deliberately do NOT use a Server Action: they go to the upload Route
 // Handler (…/snapshots/[snapshotId]/source), so file bytes never pass through the Server Action protocol and the Server
@@ -30,6 +29,6 @@ export async function markStaleSnapshotFailed(
   if (!target) return { error: PERMISSION_MESSAGE };
   const result = await failStaleSnapshot(target.repositoryId, target.ids.snapshotId);
   if (!result.ok) return { error: result.error };
-  revalidateSnapshotPages(target.ids);
-  redirect(snapshotPath(target.ids));
+  // No revalidatePath/redirect(): MarkFailedForm reloads the page (see src/components/ui/reload.ts).
+  return { success: "Snapshot marked as failed. Upload its archive again to retry." };
 }

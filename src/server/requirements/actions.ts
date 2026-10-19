@@ -1,7 +1,6 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { requireUser } from "@/server/auth/session";
@@ -64,8 +63,8 @@ export async function createRequirement(
   });
   if (error) return { error: toErrorMessage(error) };
 
-  revalidatePath(requirementsPath(ids.data));
-  redirect(requirementsPath(ids.data));
+  // No redirect(): the form opens this page with a full load (see src/components/ui/reload.ts).
+  return { redirectTo: requirementsPath(ids.data) };
 }
 
 export async function updateRequirement(
@@ -142,7 +141,7 @@ export async function updateRequirementStatus(
   if (error) return { error: toErrorMessage(error) };
   if (data.length === 0) return { error: PERMISSION_MESSAGE };
 
-  revalidatePath(requirementsPath(ids.data));
+  // No revalidatePath: RequirementStatusActions reloads the page (see src/components/ui/reload.ts).
   return {};
 }
 

@@ -2,10 +2,9 @@ import "server-only";
 import { createClient } from "@/lib/supabase/server";
 import { requireUser } from "@/server/auth/session";
 import { idSchema } from "@/server/departments/schema";
+import { can } from "@/lib/authz/permissions";
 import { getMyOrganization } from "@/server/organizations/queries";
 import { getMyDepartment, getMyTeam } from "@/server/teams/queries";
-
-const CAN_MANAGE = ["OWNER", "ADMIN"];
 
 // Verifies the whole chain from the database, never from the URL:
 // organization (caller is a member) -> department (belongs to it) -> team (belongs to it).
@@ -22,7 +21,7 @@ export async function getTeamContext(organizationId: string, departmentId: strin
   const team = await getMyTeam(department.id, teamId);
   if (!team) return null;
 
-  const canManage = CAN_MANAGE.includes(organization.role);
+  const canManage = can(organization.role, "hierarchy.manage");
   const supabase = await createClient();
   const { data: membership, error } = await supabase
     .from("team_members")

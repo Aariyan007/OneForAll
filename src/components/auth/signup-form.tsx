@@ -7,7 +7,7 @@ import { SubmitButton } from "@/components/ui/submit-button";
 import { signUp } from "@/server/auth/actions";
 import type { AuthFormState } from "@/server/auth/schema";
 
-export function SignupForm() {
+export function SignupForm({ next }: { next?: string }) {
   const [state, formAction, pending] = useActionState<AuthFormState, FormData>(signUp, {});
 
   if (state.message) {
@@ -20,6 +20,7 @@ export function SignupForm() {
 
   return (
     <form action={formAction} className="flex flex-col gap-4" noValidate>
+      {next && <input type="hidden" name="next" value={next} />}
       <FormField label="Name" name="displayName" autoComplete="name" placeholder="Ada Lovelace" required errors={state.fieldErrors?.displayName} />
       <FormField label="Work email" name="email" type="email" autoComplete="email" placeholder="you@company.com" required errors={state.fieldErrors?.email} />
       <FormField

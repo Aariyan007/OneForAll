@@ -11,6 +11,8 @@ export const teamFieldsSchema = z.object({
 
 export type TeamFormState = {
   error?: string;
+  // Page to open after success (server-built from verified ids); see src/components/ui/reload.ts.
+  redirectTo?: string;
   fieldErrors?: { name?: string[]; description?: string[] };
 };
 

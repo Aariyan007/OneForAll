@@ -1,7 +1,6 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { requireUser } from "@/server/auth/session";
@@ -75,8 +74,8 @@ export async function createRepository(
   });
   if (error) return { error: toErrorMessage(error) };
 
-  revalidatePath(projectPath(ids.data));
-  redirect(projectPath(ids.data));
+  // No redirect(): the form opens this page with a full load (see src/components/ui/reload.ts).
+  return { redirectTo: projectPath(ids.data) };
 }
 
 // Only default_branch and visibility are editable. The repository's identity (provider, URL, owner, name)
@@ -179,6 +178,6 @@ export async function disconnectRepository(
   if (error) return { error: toErrorMessage(error) };
   if (data.length === 0) return { error: PERMISSION_MESSAGE };
 
-  revalidatePath(projectPath(ids.data));
-  return {};
+  // No revalidatePath: DisconnectRepositoryForm reloads the page instead (see src/components/ui/reload.ts).
+  return { success: "Repository disconnected." };
 }

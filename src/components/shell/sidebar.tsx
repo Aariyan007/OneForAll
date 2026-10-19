@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { Avatar } from "@/components/ui/data";
 import { IconChevronsUpDown, IconClose, IconLogo, IconPlus, IconSettings } from "@/components/ui/icons";
+import { ROLE_LABELS, isOrgRole } from "@/lib/authz/permissions";
 import { cx } from "@/lib/cx";
 import type { ShellOrganization } from "./app-shell";
 import { NavIcon } from "./nav-icon";
@@ -21,8 +22,8 @@ export function Sidebar({
   onCloseDrawer: () => void;
 }) {
   const ctx = parseRoute(pathname);
-  const sections = buildNav(ctx);
   const current = organizations.find((org) => org.id === ctx.organizationId);
+  const sections = buildNav(ctx, current?.role);
 
   return (
     <>
@@ -191,7 +192,7 @@ function WorkspaceSelector({ organizations, current }: { organizations: ShellOrg
             {organizations.map((org) => (
               <Link
                 key={org.id}
-                href={`/organizations/${org.id}/departments`}
+                href={`/organizations/${org.id}/overview`}
                 role="option"
                 aria-selected={org.id === current?.id}
                 onClick={() => setOpen(false)}
@@ -224,5 +225,5 @@ function WorkspaceSelector({ organizations, current }: { organizations: ShellOrg
 }
 
 function roleLabel(role: string) {
-  return role.charAt(0) + role.slice(1).toLowerCase();
+  return isOrgRole(role) ? ROLE_LABELS[role] : role;
 }

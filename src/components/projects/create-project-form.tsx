@@ -5,6 +5,7 @@ import { Alert } from "@/components/ui/alert";
 import { FormField, RadioCards } from "@/components/ui/form-field";
 import { IconBox, IconSparkle } from "@/components/ui/icons";
 import { FormActions, SubmitButton } from "@/components/ui/submit-button";
+import { useNavigateOnRedirect } from "@/components/ui/reload";
 import type { ProjectFormState } from "@/server/projects/schema";
 
 type CreateProjectAction = (prev: ProjectFormState, formData: FormData) => Promise<ProjectFormState>;
@@ -20,6 +21,9 @@ const PROJECT_TYPES = [
 // loop whenever the action returns an error state.
 export function CreateProjectForm({ action, cancelHref }: { action: CreateProjectAction; cancelHref?: string }) {
   const [state, formAction, pending] = useActionState<ProjectFormState, FormData>(action, {});
+  // Success returns the page to open; it opens with a full load and the form stays busy until then
+  // (see src/components/ui/reload.ts). Without JavaScript the form still posts to the Server Action.
+  const leaving = useNavigateOnRedirect(state);
 
   return (
     <form action={formAction} className="flex flex-col gap-5" noValidate>
@@ -42,10 +46,17 @@ export function CreateProjectForm({ action, cancelHref }: { action: CreateProjec
       <RadioCards legend="Project type" name="projectType" defaultValue="GREENFIELD" options={PROJECT_TYPES} errors={state.fieldErrors?.projectType} />
       {state.error && <Alert tone="danger">{state.error}</Alert>}
       <FormActions cancelHref={cancelHref}>
-        <SubmitButton pending={pending} pendingLabel="Creating…">
+        <SubmitButton pending={pending || leaving} pendingLabel="Creating…">
           Create project
         </SubmitButton>
       </FormActions>
+      {state.redirectTo && (
+        <noscript>
+          <a href={state.redirectTo} className="text-[13px] text-fg underline">
+            Saved. Continue
+          </a>
+        </noscript>
+      )}
     </form>
   );
 }

@@ -1,3 +1,4 @@
+import { Alert } from "@/components/ui/alert";
 import { ButtonLink } from "@/components/ui/button";
 import { Card, CardLink } from "@/components/ui/card";
 import { Avatar, EmptyState, MetricCard } from "@/components/ui/data";
@@ -16,7 +17,9 @@ import { PageBody, PageHeader, SectionHeader } from "@/components/ui/page";
 import { StatusBadge } from "@/components/ui/status";
 import { listMyWorkspaces } from "@/lib/workspaces";
 import { requireUser } from "@/server/auth/session";
+import { listMyInvitations, listMySuspendedMemberships } from "@/server/members/queries";
 import { getProfile } from "@/server/profiles/queries";
+import { ROLE_LABELS, isOrgRole } from "@/lib/authz/permissions";
 
 export const metadata = { title: "Dashboard · OneForAll" };
 
@@ -30,7 +33,12 @@ const HIERARCHY = [
 
 export default async function DashboardPage() {
   const user = await requireUser();
-  const [profile, organizations] = await Promise.all([getProfile(user.id), listMyWorkspaces(user.id)]);
+  const [profile, organizations, invitations, suspended] = await Promise.all([
+    getProfile(user.id),
+    listMyWorkspaces(user.id),
+    listMyInvitations(),
+    listMySuspendedMemberships(),
+  ]);
   const name = profile?.display_name ?? profile?.email ?? "there";
   const managed = organizations.filter((org) => org.role === "OWNER" || org.role === "ADMIN").length;
 
@@ -54,6 +62,31 @@ export default async function DashboardPage() {
         <MetricCard label="Member only" value={organizations.length - managed} icon={<IconLayers size={15} />} hint="Read access through teams" />
       </div>
 
+      {suspended.length > 0 && (
+        <Alert tone="warning" title="Suspended access" className="mt-6">
+          Your membership is suspended in {suspended.map((s) => s.organization_name).join(", ")}. An owner or admin of that organization can
+          reactivate it; until then its pages and data are not available to you.
+        </Alert>
+      )}
+
+      {invitations.length > 0 && (
+        <section className="mt-8" aria-labelledby="invitations-heading">
+          <SectionHeader title={<span id="invitations-heading">Pending invitations</span>} description="Open the invitation link you received to join. For security, joining needs that link." />
+          <Card className="overflow-hidden">
+            <ul className="divide-y divide-border">
+              {invitations.map((i) => (
+                <li key={i.invitation_id} className="flex flex-col gap-1 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
+                  <span className="text-[13.5px] text-fg">
+                    {i.organization_name} <span className="text-fg-3">· {isOrgRole(i.role) ? ROLE_LABELS[i.role] : i.role} · invited by {i.invited_by_name}</span>
+                  </span>
+                  <span className="text-[12px] text-fg-3">expires {new Date(i.expires_at).toLocaleDateString()}</span>
+                </li>
+              ))}
+            </ul>
+          </Card>
+        </section>
+      )}
+
       <div className="mt-10 grid gap-8 lg:grid-cols-[minmax(0,1fr)_320px]">
         <section>
           <SectionHeader title="Your organizations" description="Open a workspace to manage departments, teams and projects." />
@@ -61,7 +94,7 @@ export default async function DashboardPage() {
             <EmptyState
               icon={<IconBuilding size={20} />}
               title="No organizations yet"
-              description="Create your first organization to start organizing departments, teams and engineering projects."
+              description="Create an organization to become its owner, or open the invitation link an administrator sent you to join an existing one."
               action={
                 <ButtonLink href="/organizations/new" variant="primary">
                   <IconPlus size={15} />
@@ -72,7 +105,7 @@ export default async function DashboardPage() {
           ) : (
             <div className="grid gap-3 sm:grid-cols-2">
               {organizations.map((org) => (
-                <CardLink key={org.id} href={`/organizations/${org.id}/departments`} className="p-4">
+                <CardLink key={org.id} href={`/organizations/${org.id}/overview`} className="p-4">
                   <div className="flex items-start gap-3">
                     <Avatar name={org.name} size="lg" square />
                     <div className="min-w-0 flex-1">

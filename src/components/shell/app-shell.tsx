@@ -2,6 +2,7 @@
 
 import { usePathname } from "next/navigation";
 import { useState } from "react";
+import { PageNotice } from "@/components/ui/page-notice";
 import { CommandPalette } from "./command-palette";
 import { Sidebar } from "./sidebar";
 import { TopBar } from "./top-bar";
@@ -14,11 +15,13 @@ export type ShellUser = { name: string; email: string };
 export function AppShell({
   user,
   organizations,
+  unreadNotifications,
   signOutAction,
   children,
 }: {
   user: ShellUser;
   organizations: ShellOrganization[];
+  unreadNotifications: number;
   signOutAction: () => Promise<void>;
   children: React.ReactNode;
 }) {
@@ -39,11 +42,13 @@ export function AppShell({
       <div className="flex min-w-0 flex-1 flex-col md:pl-[var(--sidebar-w-compact)] lg:pl-[var(--sidebar-w)]">
         <TopBar
           user={user}
+          unreadNotifications={unreadNotifications}
           signOutAction={signOutAction}
           onOpenMenu={() => setDrawerPath(pathname)}
           onOpenPalette={() => setPaletteOpen(true)}
         />
         <main id="main" className="flex-1 px-4 pt-6 pb-16 sm:px-6 lg:px-10 lg:pt-8">
+          <PageNotice />
           {children}
         </main>
       </div>

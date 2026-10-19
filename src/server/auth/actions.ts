@@ -54,7 +54,7 @@ export async function signUp(_prev: AuthFormState, formData: FormData): Promise<
     return { message: "Check your email to confirm your account, then sign in." };
   }
 
-  redirect("/dashboard");
+  redirect(safeRedirectPath(formData.get("next")));
 }
 
 export async function signOut() {

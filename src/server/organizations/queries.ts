@@ -1,12 +1,14 @@
 import "server-only";
 import { createClient } from "@/lib/supabase/server";
 
-// Organizations the current user belongs to. RLS limits rows to the caller's memberships.
-export async function listMyOrganizations() {
+// Organizations the user belongs to, with the user's own role in each. Filtered by user id: RLS alone returns every
+// membership row of the caller's organizations (one row per member), which listed an organization once per member.
+export async function listMyOrganizations(userId: string) {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("organization_members")
     .select("role, organizations(id, name, slug)")
+    .eq("user_id", userId)
     .order("created_at", { ascending: false });
 
   if (error) throw new Error(`Failed to load organizations: ${error.message}`);

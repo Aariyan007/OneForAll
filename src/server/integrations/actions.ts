@@ -1,12 +1,11 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { requireUser } from "@/server/auth/session";
 import { idSchema } from "@/server/departments/schema";
 import { PERMISSION_MESSAGE } from "@/server/requirements/errors";
-import { getIntegrationContext, integrationsPath } from "./context";
+import { getIntegrationContext } from "./context";
 import { GitHubClient, parseGitHubRepo } from "./github";
 import {
   connectJira,
@@ -21,6 +20,9 @@ import {
 // Integration settings actions. Every action verifies the session, re-checks the whole project chain from the database
 // and refuses early unless the caller can manage the project; the database functions re-check OWNER/ADMIN for every
 // write. Secrets arrive only in the POST body, are never echoed back, logged or stored in plaintext.
+// No revalidatePath here: on this Next.js version (16.2.9) applying the re-rendered page that a revalidating Server
+// Action returns was observed to leave the client transition pending (the change was saved, the UI stayed "pending").
+// ActionForm reloads the page after a successful change instead (see src/components/ui/reload.ts).
 
 export type IntegrationFormState = { error?: string; success?: string };
 
@@ -49,7 +51,6 @@ export async function saveGitHubTokenAction(
   if (!target) return { error: PERMISSION_MESSAGE };
   const result = await saveGitHubToken(target.context.project.id, target.context.repository, field(formData, "token"));
   if (!result.ok) return { error: result.error };
-  revalidatePath(integrationsPath(target.ids));
   return { success: `Token saved. It belongs to GitHub user ${result.login} and is stored encrypted.` };
 }
 
@@ -62,7 +63,6 @@ export async function removeGitHubTokenAction(
   if (!target) return { error: PERMISSION_MESSAGE };
   const result = await removeGitHubToken(target.context.project.id);
   if (!result.ok) return { error: result.error };
-  revalidatePath(integrationsPath(target.ids));
   return { success: "Token removed. Public repositories can still be imported without one." };
 }
 
@@ -95,8 +95,6 @@ export async function connectGitHubRepositoryAction(
     p_visibility: chosen.private ? "PRIVATE" : "PUBLIC",
   });
   if (error) return { error: error.code === "23505" ? "This project already has a repository." : "The repository could not be connected." };
-  revalidatePath(integrationsPath(target.ids));
-  revalidatePath(integrationsPath(target.ids).replace(/\/integrations$/, ""));
   return { success: `Connected ${chosen.fullName}.` };
 }
 
@@ -127,7 +125,6 @@ export async function connectJiraAction(
   if (!target) return { error: PERMISSION_MESSAGE };
   const result = await connectJira(target.context.project.id, field(formData, "site"), field(formData, "email"), field(formData, "token"));
   if (!result.ok) return { error: result.error };
-  revalidatePath(integrationsPath(target.ids));
   return { success: `Connected to Jira as ${result.displayName}. The API token is stored encrypted. Choose a Jira project next.` };
 }
 
@@ -139,7 +136,6 @@ export async function selectJiraProjectAction(
   if (!target) return { error: PERMISSION_MESSAGE };
   const result = await selectJiraProject(target.context.project.id, field(formData, "projectKey"));
   if (!result.ok) return { error: result.error };
-  revalidatePath(integrationsPath(target.ids));
   return { success: "Jira project selected. Run a sync to import its issues." };
 }
 
@@ -153,6 +149,5 @@ export async function disconnectIntegrationAction(
   if (kind !== "GITHUB" && kind !== "JIRA") return { error: "Unknown integration." };
   const result = await disconnectIntegration(target.context.project.id, kind);
   if (!result.ok) return { error: result.error };
-  revalidatePath(integrationsPath(target.ids));
   return { success: kind === "JIRA" ? "Jira disconnected. Imported issues are kept." : "GitHub disconnected. Snapshots are kept." };
 }

@@ -1,7 +1,6 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { requireUser } from "@/server/auth/session";
@@ -55,8 +54,8 @@ export async function createDepartment(
   });
   if (error) return { error: toErrorMessage(error) };
 
-  revalidateDepartments(orgId.data);
-  redirect(`/organizations/${orgId.data}/departments`);
+  // No redirect(): the form opens this page with a full load (see src/components/ui/reload.ts).
+  return { redirectTo: `/organizations/${orgId.data}/departments` };
 }
 
 export async function updateDepartment(

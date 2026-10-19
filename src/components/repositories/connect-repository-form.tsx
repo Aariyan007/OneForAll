@@ -4,6 +4,7 @@ import { useActionState } from "react";
 import { Alert } from "@/components/ui/alert";
 import { FormField, SelectField } from "@/components/ui/form-field";
 import { FormActions, SubmitButton } from "@/components/ui/submit-button";
+import { useNavigateOnRedirect } from "@/components/ui/reload";
 import {
   PROVIDERS,
   PROVIDER_LABELS,
@@ -23,6 +24,9 @@ const VISIBILITY_OPTIONS = VISIBILITIES.map((value) => ({ value, label: VISIBILI
 // returns an error state.
 export function ConnectRepositoryForm({ action, cancelHref }: { action: ConnectRepositoryAction; cancelHref?: string }) {
   const [state, formAction, pending] = useActionState<RepositoryFormState, FormData>(action, {});
+  // Success returns the page to open; it opens with a full load and the form stays busy until then
+  // (see src/components/ui/reload.ts). Without JavaScript the form still posts to the Server Action.
+  const leaving = useNavigateOnRedirect(state);
   const errors = state.fieldErrors;
 
   return (
@@ -56,10 +60,17 @@ export function ConnectRepositoryForm({ action, cancelHref }: { action: ConnectR
       />
       {state.error && <Alert tone="danger">{state.error}</Alert>}
       <FormActions cancelHref={cancelHref}>
-        <SubmitButton pending={pending} pendingLabel="Connecting…">
+        <SubmitButton pending={pending || leaving} pendingLabel="Connecting…">
           Connect repository
         </SubmitButton>
       </FormActions>
+      {state.redirectTo && (
+        <noscript>
+          <a href={state.redirectTo} className="text-[13px] text-fg underline">
+            Saved. Continue
+          </a>
+        </noscript>
+      )}
     </form>
   );
 }

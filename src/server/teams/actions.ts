@@ -1,7 +1,6 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { requireUser } from "@/server/auth/session";
@@ -58,8 +57,8 @@ export async function createTeam(
   });
   if (error) return { error: toErrorMessage(error) };
 
-  revalidateTeams(ids.data.organizationId, ids.data.departmentId);
-  redirect(`/organizations/${ids.data.organizationId}/departments/${ids.data.departmentId}/teams`);
+  // No redirect(): the form opens this page with a full load (see src/components/ui/reload.ts).
+  return { redirectTo: `/organizations/${ids.data.organizationId}/departments/${ids.data.departmentId}/teams` };
 }
 
 export async function updateTeam(

@@ -1,17 +1,20 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { useEffect, useRef } from "react";
 import { Avatar } from "@/components/ui/data";
 import { IconBell, IconLogout, IconMenu, IconSearch } from "@/components/ui/icons";
 import type { ShellUser } from "./app-shell";
 
 export function TopBar({
   user,
+  unreadNotifications,
   signOutAction,
   onOpenMenu,
   onOpenPalette,
 }: {
   user: ShellUser;
+  unreadNotifications: number;
   signOutAction: () => Promise<void>;
   onOpenMenu: () => void;
   onOpenPalette: () => void;
@@ -41,55 +44,28 @@ export function TopBar({
       </button>
 
       <div className="ml-auto flex items-center gap-1.5">
-        <NotificationsButton />
+        <NotificationsLink unread={unreadNotifications} />
         <AccountMenu user={user} signOutAction={signOutAction} />
       </div>
     </header>
   );
 }
 
-function usePopover() {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    function onDown(event: MouseEvent) {
-      if (ref.current && !ref.current.contains(event.target as Node)) setOpen(false);
-    }
-    function onKey(event: KeyboardEvent) {
-      if (event.key === "Escape") setOpen(false);
-    }
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-  return { open, setOpen, ref };
-}
-
-// Placeholder only: there is no notification system yet, and the panel says exactly that.
-function NotificationsButton() {
-  const { open, setOpen, ref } = usePopover();
+// In-app notifications (the unread count is read on the server for the signed-in user).
+function NotificationsLink({ unread }: { unread: number }) {
   return (
-    <div ref={ref} className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen(!open)}
-        aria-expanded={open}
-        aria-label="Notifications"
-        className="inline-flex size-8 items-center justify-center rounded-md text-fg-2 transition-colors hover:bg-surface-3 hover:text-fg"
-      >
-        <IconBell size={16} />
-      </button>
-      {open && (
-        <div className="absolute top-full right-0 z-50 mt-2 w-72 animate-pop rounded-lg border border-border-strong bg-surface-2 p-4 shadow-pop">
-          <p className="t-h3 text-fg">Notifications</p>
-          <p className="t-small mt-1 text-fg-3">Notifications are not available yet. Activity will appear here in a later release.</p>
-        </div>
+    <Link
+      href="/notifications"
+      aria-label={unread > 0 ? `Notifications, ${unread} unread` : "Notifications"}
+      className="relative inline-flex size-8 items-center justify-center rounded-md text-fg-2 transition-colors hover:bg-surface-3 hover:text-fg"
+    >
+      <IconBell size={16} />
+      {unread > 0 && (
+        <span aria-hidden="true" className="absolute -top-0.5 -right-0.5 min-w-4 rounded-full bg-accent px-1 text-center text-[10px] leading-4 font-semibold text-white tabular-nums">
+          {unread > 99 ? "99+" : unread}
+        </span>
       )}
-    </div>
+    </Link>
   );
 }
 

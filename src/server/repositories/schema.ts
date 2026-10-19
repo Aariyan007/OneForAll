@@ -88,6 +88,8 @@ export function parseRepositoryUrl(
 
 export type RepositoryFormState = {
   error?: string;
+  // Page to open after success (server-built from verified ids); see src/components/ui/reload.ts.
+  redirectTo?: string;
   fieldErrors?: {
     provider?: string[];
     repositoryUrl?: string[];
@@ -98,7 +100,7 @@ export type RepositoryFormState = {
   };
 };
 
-export type RepositoryActionResult = { error?: string };
+export type RepositoryActionResult = { error?: string; success?: string };
 
 const connectFieldsSchema = z.object({
   provider: providerSchema,
