@@ -12,7 +12,9 @@
     "db:start": "supabase start",
     "db:stop": "supabase stop",
     "db:reset": "supabase db reset",
-    "db:types": "supabase gen types typescript --local > src/types/database.ts"
+    "db:types": "supabase gen types typescript --local > src/types/database.ts",
+    "test": "tsx --test \"src/**/*.test.ts\" \"src/**/*.test.tsx\"",
+    "test:sql": "bash scripts/test-sql.sh"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",
@@ -39,6 +41,7 @@
     "eslint-config-next": "16.2.9",
     "supabase": "^2.120.0",
     "tailwindcss": "^4",
+    "tsx": "^4.23.15",
     "typescript": "^5"
   }
 }
