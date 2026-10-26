@@ -1,0 +1,66 @@
+{
+  "note": "Evaluation tasks over fixtures/ai-eval/sample-repo. 'expect' lists checks on the validated result; matches are case-insensitive regular expressions over the result JSON. The sample repo has two known defects: TaskStore.findOverdue compares the wrong way round (returns future tasks), and isSessionExpired compares milliseconds with a TTL in seconds.",
+  "requirement": {
+    "id": "11111111-1111-4111-8111-111111111111",
+    "title": "Overdue task reminders",
+    "description": "Users get a reminder email listing their open tasks whose due date has passed. Sessions stay valid for one hour.",
+    "status": "READY",
+    "tasks": [
+      { "title": "List overdue tasks", "description": null, "status": "TODO", "acceptanceCriteria": "Only open tasks whose due date is in the past" },
+      { "title": "Format the reminder email", "description": null, "status": "TODO", "acceptanceCriteria": null }
+    ]
+  },
+  "tasks": [
+    {
+      "id": "qa-overdue",
+      "job": "code_qa",
+      "input": { "question": "How does findOverdue decide which tasks are overdue? Is the comparison correct?" },
+      "expect": { "matches": ["findOverdue", "(future|incorrect|wrong|bug|should be|instead of)"], "cites": ["src/tasks/store.ts"] }
+    },
+    {
+      "id": "qa-session",
+      "job": "code_qa",
+      "input": { "question": "Where is the session expiry checked, and is the time unit handling correct?" },
+      "expect": { "matches": ["millisecond", "(seconds|3600)"], "cites": ["src/auth/session.ts"] }
+    },
+    {
+      "id": "qa-sorting",
+      "job": "code_qa",
+      "input": { "question": "How does list() order the open tasks?" },
+      "expect": { "matches": ["priorityScore", "24"], "cites": ["src/tasks/priority.ts"] }
+    },
+    {
+      "id": "qa-empty-rate",
+      "job": "code_qa",
+      "input": { "question": "What does completion_rate return for an empty task list?" },
+      "expect": { "matches": ["0\\.0|\\b0\\b|zero"], "cites": ["scripts/report.py"] }
+    },
+    {
+      "id": "review-session",
+      "job": "code_review",
+      "input": { "mode": "review", "path": "src/auth/session.ts" },
+      "expect": { "matches": ["millisecond"], "cites": ["src/auth/session.ts"] }
+    },
+    {
+      "id": "explain-not-found",
+      "job": "code_review",
+      "input": {
+        "mode": "explain_error",
+        "errorText": "Error: Task 7 not found\n    at TaskStore.complete (src/tasks/store.ts:24:21)\n    at markDone (src/routes/tasks.ts:41:11)\n    at processTicksAndRejections (node:internal/process/task_queues:95:5)"
+      },
+      "expect": { "matches": ["complete", "(not found|does not exist|no task|unknown|missing|invalid)"], "cites": ["src/tasks/store.ts"] }
+    },
+    {
+      "id": "generate-priority-tests",
+      "job": "generate",
+      "input": { "kind": "tests", "path": "src/tasks/priority.ts", "instructions": "Use node:test and node:assert/strict like tests/store.test.ts" },
+      "expect": { "syntaxValid": true, "contentMatches": ["priorityScore", "done"], "contentNotMatches": ["completed:"] }
+    },
+    {
+      "id": "trace-reminders",
+      "job": "requirement_trace",
+      "input": { "requirementId": "11111111-1111-4111-8111-111111111111" },
+      "expect": { "matches": ["findOverdue", "(millisecond|unit|seconds)"], "cites": ["src/tasks/store.ts"] }
+    }
+  ]
+}

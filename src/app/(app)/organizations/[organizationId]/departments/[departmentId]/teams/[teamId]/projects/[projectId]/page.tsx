@@ -234,6 +234,23 @@ export default async function ProjectPage({
             )}
           </section>
 
+          {/* The sidebar's "Engineering Intelligence" link targets #intelligence, so the anchor exists either way. */}
+          {!repository && (
+            <section id="intelligence" className="scroll-mt-24">
+              <SectionHeader
+                title="Repository Intelligence"
+                description="Snapshots of the code this project ships, and the structure extracted from them."
+                icon={<IconBranch size={16} />}
+              />
+              <EmptyState
+                compact
+                icon={<IconBranch size={20} />}
+                title="Connect a repository first"
+                description="Snapshots, structure analysis and the AI assistant work on a connected repository."
+              />
+            </section>
+          )}
+
           {repository && (
             <RepositoryIntelligence
               organizationId={organization.id}

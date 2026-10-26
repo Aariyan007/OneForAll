@@ -1,13 +1,17 @@
 "use server";
 
+import { headers } from "next/headers";
 import { z } from "zod";
-import { invitableRoles } from "@/lib/authz/permissions";
+import { ROLE_LABELS, invitableRoles } from "@/lib/authz/permissions";
 import { publicEnv } from "@/lib/env";
+import { buildInvitationEmail, invitationLink, resolveAppUrl } from "@/lib/members/invitation-email";
 import { createClient } from "@/lib/supabase/server";
 import { requireUser } from "@/server/auth/session";
 import { getOrgAccess } from "@/server/authz/access";
 import { idSchema } from "@/server/departments/schema";
+import { sendEmail } from "@/server/email/mailer";
 import { rpcErrorMessage } from "@/server/errors";
+import { getProfile } from "@/server/profiles/queries";
 
 // Membership Server Actions. Each one re-verifies the session and the caller's membership of the organization from
 // the database (getOrgAccess), validates input, and calls a SECURITY DEFINER function that checks the caller's role
@@ -16,7 +20,13 @@ import { rpcErrorMessage } from "@/server/errors";
 // Action returns was observed to leave the client transition pending on complex pages (the action ran, the UI stayed
 // "pending"). Client components reload the page after a successful change instead (see docs/rbac-workforce.md).
 
-export type MemberActionState = { error?: string; success?: string; inviteLink?: string; invitedEmail?: string };
+export type MemberActionState = {
+  error?: string;
+  success?: string;
+  inviteLink?: string;
+  invitedEmail?: string;
+  emailDelivery?: "sent" | "not-configured" | "failed";
+};
 
 const tokenSchema = z.string().regex(/^[A-Za-z0-9_-]{20,100}$/);
 
@@ -38,11 +48,25 @@ export async function inviteMember(organizationId: string, _prev: MemberActionSt
   const created = data?.[0];
   if (error || !created) return { error: rpcErrorMessage(error, "The invitation could not be created.") };
 
-  // The token travels in the URL fragment, which browsers never send to a server, so it does not end up in request logs.
+  const appUrl = resolveAppUrl({ appUrl: process.env.APP_URL, origin: (await headers()).get("origin"), siteUrl: publicEnv.NEXT_PUBLIC_SITE_URL });
+  const inviteLink = invitationLink(appUrl, created.token);
+  const inviter = await getProfile(access.user.id).catch(() => null);
+  const delivery = await sendEmail(
+    parsed.data.email,
+    buildInvitationEmail({
+      organizationName: access.organization.name,
+      inviterName: inviter?.display_name?.trim() || inviter?.email || "A teammate",
+      roleLabel: ROLE_LABELS[parsed.data.role],
+      link: inviteLink,
+      expiresAt: created.expires_at,
+    }),
+  );
+  // The link is still returned (shown once) so the inviter can resend it by hand if the email does not arrive.
   return {
-    success: `Invitation created for ${parsed.data.email}.`,
+    success: delivery.sent ? `Invitation emailed to ${parsed.data.email}.` : `Invitation created for ${parsed.data.email}.`,
     invitedEmail: parsed.data.email,
-    inviteLink: `${publicEnv.NEXT_PUBLIC_SITE_URL.replace(/\/$/, "")}/invitations#${created.token}`,
+    inviteLink,
+    emailDelivery: delivery.sent ? "sent" : delivery.reason,
   };
 }
 
