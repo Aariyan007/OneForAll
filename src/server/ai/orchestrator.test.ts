@@ -126,6 +126,15 @@ describe("runJob", () => {
     assert.equal(h.provider.requests[3].model, "gemini-3.5-flash-lite");
   });
 
+  it("falls back to the cheaper tier when the standard model hangs past the per-call timeout", async () => {
+    const h = harness([new LlmError("timeout", "per-call timeout"), { text: JSON.stringify({ summary: "ok", findings: [], confidence: "low", missingContext: [] }) }]);
+    const outcome = await runJob(h.deps, "code_review", { mode: "review", path: "src/tasks/store.ts" }, { signal: signal(), deadlineMs: 1_000_000 });
+    assert.equal(outcome.status, "completed");
+    assert.equal(outcome.fallback, true);
+    assert.equal(h.provider.requests.length, 2, "the hung model is not retried; the next tier is tried once");
+    assert.equal(h.provider.requests[1].model, "gemini-3.5-flash-lite");
+  });
+
   it("stops offering tools after the tool-call limit and asks for an answer", async () => {
     const call = { toolCalls: [{ name: "search_code", args: { query: "Task" } }] };
     const steps: FakeStep[] = Array.from({ length: ORCHESTRATOR_LIMITS.maxToolCalls }, () => call);
@@ -168,6 +177,15 @@ describe("runJob", () => {
     const h = harness([new LlmError("timeout", "aborted")], { clockStep: 1_000 });
     const outcome = await runJob(h.deps, "code_qa", { question: "Where is findOverdue defined?" }, { signal: signal(), deadlineMs: 20_000 });
     assert.equal(outcome.status, "timed_out");
+  });
+
+  it("ends the run at the deadline even if the provider never answers and ignores aborts", async () => {
+    const hung = { name: "hung", requests: [] as unknown[], generate: () => new Promise<never>(() => {}) };
+    const h = harness([]);
+    const started = Date.now();
+    const outcome = await runJob({ ...h.deps, provider: hung, now: Date.now }, "code_qa", { question: "Where is findOverdue defined?" }, { signal: signal(), deadlineMs: 300 });
+    assert.equal(outcome.status, "timed_out");
+    assert.ok(Date.now() - started < 2000, "returned promptly");
   });
 
   it("checks generated tests for syntax and asks once for a fix", async () => {

@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import { ButtonLink } from "@/components/ui/button";
 import { Card, CardHeader } from "@/components/ui/card";
 import { EmptyState, KeyValueList } from "@/components/ui/data";
-import { IconListChecks, IconPlus, IconTask } from "@/components/ui/icons";
+import { IconListChecks, IconPlus, IconSparkle, IconTask } from "@/components/ui/icons";
 import { PageBody, PageHeader, SectionHeader } from "@/components/ui/page";
 import { RequirementStatusActions } from "@/components/work-items/requirement-status";
 import { REQUIREMENT_STATUSES, type RequirementStatus } from "@/server/requirements/schema";
@@ -60,13 +60,19 @@ export default async function RequirementPage({
           </>
         }
         actions={
-          /* UI hint only. The database enforces who may actually create tasks. */
-          canManage && (
-            <ButtonLink href={`${base}/${requirement.id}/tasks/new`} variant="primary">
-              <IconPlus size={15} />
-              New task
+          <>
+            <ButtonLink href={`${projectPath}/assistant?tab=trace&requirement=${requirement.id}`}>
+              <IconSparkle size={15} />
+              Trace to code
             </ButtonLink>
-          )
+            {/* UI hint only. The database enforces who may actually create tasks. */}
+            {canManage && (
+              <ButtonLink href={`${base}/${requirement.id}/tasks/new`} variant="primary">
+                <IconPlus size={15} />
+                New task
+              </ButtonLink>
+            )}
+          </>
         }
       />
 

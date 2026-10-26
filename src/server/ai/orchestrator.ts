@@ -7,6 +7,7 @@ import type { ModelRegistry } from "./models";
 import { type LlmProvider, type LlmRequest, type LlmResponse, type LlmTurn, LlmError } from "./provider/types";
 import { RETRY_POLICY, backoffMillis, isRetryable } from "./retry";
 import { chooseTier } from "./router";
+import { callSignal } from "./signals";
 import { canTransition } from "./state";
 import { type RepoReader, isSafeRepoPath, runTool, toolDeclarations } from "./tools";
 import { type Citation, type JobType, type ProviderErrorCategory, type RunErrorCategory, type RunState, type Tier, type Usage, ZERO_USAGE, addUsage } from "./types";
@@ -28,7 +29,8 @@ export const ORCHESTRATOR_LIMITS = {
   // Once this share of the deadline is used, tools are switched off and the model is asked to answer with what it has:
   // a late answer beats a timeout (measured free-tier calls take 16-24 s each).
   answerNowAt: 0.6,
-  perCallTimeoutMs: 60_000,
+  // Leaves room inside the deadline for one fallback call when a model hangs (measured: overloaded calls hang).
+  perCallTimeoutMs: 45_000,
   maxCitationFileReads: 20,
 } as const;
 
@@ -309,18 +311,26 @@ export async function runJob(
         await checkpoint(true);
         const remaining = deadlineMs - (deps.now() - started);
         const cappedByDeadline = remaining < ORCHESTRATOR_LIMITS.perCallTimeoutMs;
-        const signal = AbortSignal.any([options.signal, AbortSignal.timeout(Math.max(1, Math.min(ORCHESTRATOR_LIMITS.perCallTimeoutMs, remaining)))]);
+        const call = callSignal(options.signal, Math.max(1, Math.min(ORCHESTRATOR_LIMITS.perCallTimeoutMs, remaining)));
         attempts++;
         const t0 = deps.now();
         try {
-          const response = await deps.provider.generate({ ...request, model: spec.id, signal });
+          // Raced against the call's own signal too: a provider that ignores aborts still cannot hold the run.
+          const response = await Promise.race([
+            deps.provider.generate({ ...request, model: spec.id, signal: call.signal }),
+            new Promise<never>((_, reject) =>
+              call.signal.addEventListener("abort", () => reject(new LlmError("timeout", "The call was aborted.")), { once: true }),
+            ),
+          ]);
           tier = candidate;
           model = spec.id;
           usage = addUsage(usage, response.usage);
           costUsd += deps.registry.estimateCostUsd(candidate, response.usage);
+          call.dispose();
           deps.onEvent?.({ type: "model", tier: candidate, model: spec.id, ms: deps.now() - t0, usage: response.usage, attempt });
           return response;
         } catch (error) {
+          call.dispose();
           if (options.signal.aborted) throw new Stop("cancelled");
           const llm = error instanceof LlmError ? error : new LlmError("network", "provider call failed");
           // The call's timeout was the run's remaining time, so this is the run deadline, not a slow provider.
@@ -336,7 +346,8 @@ export async function runJob(
           break;
         }
       }
-      if (!last || !["unavailable", "rate_limited", "quota", "network"].includes(last.category)) break;
+      // A per-call timeout here is a hung, overloaded model (deadline-capped calls already ended the run as timed_out).
+      if (!last || !["unavailable", "rate_limited", "quota", "network", "timeout"].includes(last.category)) break;
     }
     throw new RunFailure(last?.category ?? "internal");
   }

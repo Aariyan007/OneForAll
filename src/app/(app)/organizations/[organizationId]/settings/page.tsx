@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { AiToggle } from "@/components/ai/ai-toggle";
 import { RenameOrganizationForm } from "@/components/organizations/org-controls";
 import { AssignmentModeControl } from "@/components/workforce/workforce-controls";
 import { Card, CardHeader } from "@/components/ui/card";
@@ -8,6 +9,7 @@ import { PageBody, PageHeader } from "@/components/ui/page";
 import { StatusBadge } from "@/components/ui/status";
 import { ROLE_LABELS } from "@/lib/authz/permissions";
 import { getOrgAccess } from "@/server/authz/access";
+import { createClient } from "@/lib/supabase/server";
 import { getAssignmentMode } from "@/server/workforce/queries";
 
 export const metadata = { title: "Settings · OneForAll" };
@@ -21,6 +23,8 @@ export default async function OrganizationSettingsPage({ params }: PageProps<"/o
   const { organization, role } = access;
   const base = `/organizations/${organization.id}`;
   const mode = await getAssignmentMode(organization.id);
+  const supabase = await createClient();
+  const { data: settings } = await supabase.from("organization_settings").select("ai_enabled").eq("organization_id", organization.id).maybeSingle();
 
   return (
     <PageBody width="narrow">
@@ -28,7 +32,7 @@ export default async function OrganizationSettingsPage({ params }: PageProps<"/o
         crumbs={[{ label: organization.name, href: `${base}/overview` }, { label: "Settings" }]}
         icon={<IconSettings size={18} />}
         title="Organization settings"
-        description="Name, assignment policy and where people and structure are managed."
+        description="Name, assignment policy, the AI assistant and where people and structure are managed."
         badges={<StatusBadge kind="role" value={role} label={`You: ${ROLE_LABELS[role]}`} />}
       />
       <div className="flex flex-col gap-5">
@@ -47,6 +51,13 @@ export default async function OrganizationSettingsPage({ params }: PageProps<"/o
           <CardHeader title="Assignment policy" description="How new work finds the right person. Changing it is recorded in the activity log." />
           <div className="px-5 py-4">
             <AssignmentModeControl organizationId={organization.id} mode={mode} editable={access.can("org.assignmentPolicy.edit")} />
+          </div>
+        </Card>
+
+        <Card>
+          <CardHeader title="AI assistant" description="Grounded answers, requirement traces, reviews and test drafts on project snapshots. Changes are recorded in the activity log." />
+          <div className="px-5 py-4">
+            <AiToggle organizationId={organization.id} enabled={settings?.ai_enabled ?? true} editable={role === "OWNER" || role === "ADMIN"} />
           </div>
         </Card>
 
