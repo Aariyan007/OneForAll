@@ -169,6 +169,18 @@ export default async function SnapshotPage({
                   )}
                 </>
               )}
+              {graphReady && detail.storedTextFiles === 0 && (
+                <>
+                  <Alert tone="info" title="Source text is not stored for this snapshot">
+                    It was recorded before OneForAll kept the text of files, so the AI assistant cannot read it yet. Upload the same archive again to
+                    store the text; nothing else changes.
+                  </Alert>
+                  {uploadForm(
+                    "Upload the same archive to store the text",
+                    "Upload the archive this snapshot was recorded from. Files that do not match the recorded hashes are refused.",
+                  )}
+                </>
+              )}
               {completed && analysis?.status === "PROCESSING" && <Alert tone="info">Structure analysis is running.</Alert>}
             </div>
           </Card>

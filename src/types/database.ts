@@ -309,6 +309,32 @@ isOneToOne: true
       referencedColumns: ["id"]
     }
                   ]
+                },"repository_file_contents": {
+                  Row: {
+                    "byte_size": number,"content": string,"created_at": string,"file_id": string,"snapshot_id": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "byte_size": number,"content": string,"created_at"?: string,"file_id": string,"snapshot_id": string
+                  }
+                  Update: {
+                    "byte_size"?: number,"content"?: string,"created_at"?: string,"file_id"?: string,"snapshot_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "repository_file_contents_file_id_fkey"
+      columns: ["file_id"]
+isOneToOne: true
+      referencedRelation: "repository_files"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "repository_file_contents_snapshot_id_fkey"
+      columns: ["snapshot_id"]
+isOneToOne: false
+      referencedRelation: "repository_snapshots"
+      referencedColumns: ["id"]
+    }
+                  ]
                 },"repository_files": {
                   Row: {
                     "content_hash": string,"created_at": string,"id": string,"language": string | null,"path": string,"size_bytes": number,"snapshot_id": string
@@ -980,6 +1006,11 @@ isOneToOne: false
 "report_unassignable_task":
 { Args: { "p_reason": string,"p_task_id": string }; Returns: undefined
                            },
+"repository_code_search":
+{ Args: { "p_limit"?: number,"p_query": string,"p_snapshot_id": string }; Returns: {
+              "line": string,"line_number": number,"path": string
+            }[]
+                           },
 "repository_graph_edges":
 { Args: { "p_analysis_id": string,"p_limit"?: number,"p_symbol_ids": (string)[],"p_types"?: (string)[] }; Returns: {
               "analysis_id": string,"id": string,"relationship_type": string,"source_symbol_id": string,"target_symbol_id": string,"total_relationships": number
@@ -1042,6 +1073,11 @@ isOneToOne: false
                            },
 "slugify":
 { Args: { "p_fallback"?: string,"p_input": string }; Returns: string
+                           },
+"store_snapshot_contents":
+{ Args: { "p_files": Json,"p_snapshot_id": string }; Returns: {
+              "already_stored": number,"stored": number
+            }[]
                            },
 "suspend_organization_member":
 { Args: { "p_member_id": string }; Returns: undefined

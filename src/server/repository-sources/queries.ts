@@ -29,7 +29,7 @@ export async function getSnapshotDetail(
   if (error) throw new Error("Failed to load the snapshot.");
   if (!snapshot) return null;
 
-  const [source, files, supported, analysis] = await Promise.all([
+  const [source, files, supported, analysis, texts] = await Promise.all([
     supabase
       .from("repository_snapshot_sources")
       .select("source_kind, verification, archive_format, archive_sha256, archive_bytes, archive_commit, entries_total, files_accepted, files_skipped, files_skipped_oversized, files_skipped_generated, files_skipped_metadata, files_skipped_sensitive, created_at")
@@ -42,8 +42,9 @@ export async function getSnapshotDetail(
       .eq("snapshot_id", snapshot.id)
       .in("language", [...SUPPORTED_LANGUAGES]),
     getAnalysisForSnapshot(snapshot.id),
+    supabase.from("repository_file_contents").select("file_id", { count: "exact", head: true }).eq("snapshot_id", snapshot.id),
   ]);
-  if (source.error || files.error || supported.error) throw new Error("Failed to load the snapshot source.");
+  if (source.error || files.error || supported.error || texts.error) throw new Error("Failed to load the snapshot source.");
 
   return {
     ...context,
@@ -51,6 +52,8 @@ export async function getSnapshotDetail(
     source: source.data,
     manifestFiles: files.count ?? 0,
     supportedFiles: supported.count ?? 0,
+    // Files whose text is stored for reading (AI assistant); 0 for snapshots recorded before the content store.
+    storedTextFiles: texts.count ?? 0,
     analysis,
   };
 }

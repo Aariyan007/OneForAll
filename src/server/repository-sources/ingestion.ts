@@ -9,6 +9,7 @@ import { getAnalysisReadiness } from "@/server/repository-structure/readiness";
 import { analyzeSnapshot } from "@/server/repository-structure/run";
 import type { SourceFile } from "@/server/repository-structure/source";
 import { type SourceArchive, countExclusions, matchesManifest, readSourceArchive } from "./archive";
+import { contentBatches } from "./contents";
 import { ARCHIVE_LIMITS, STALE_PROCESSING_MILLIS } from "./limits";
 import { createArchiveSourceProvider } from "./provider";
 import { ArchiveError } from "./zip";
@@ -29,6 +30,11 @@ import { ArchiveError } from "./zip";
 //
 // The archive bytes live only in this request's memory and are dropped when it ends. Re-analysing a COMPLETED
 // snapshot needs an upload whose files match the recorded manifest exactly.
+//
+// After the manifest is recorded, the text of its files is stored (store_snapshot_contents, migration 20261028000002):
+// the database accepts only the exact bytes the sealed manifest hashed. Storing is best effort and idempotent: a
+// failure leaves the snapshot COMPLETED, and uploading the same archive again fills in what is missing (this is also
+// how snapshots recorded before the content store get their text).
 
 // `changed` is true when the database was written (the snapshot moved to FAILED); validation errors write nothing.
 export type IngestionResult =
@@ -118,6 +124,29 @@ async function readUpload(upload: unknown): Promise<SourceArchive> {
   return readSourceArchive(Buffer.from(await upload.arrayBuffer()), ARCHIVE_LIMITS);
 }
 
+// Stores the text files of a COMPLETED snapshot in batches. Returns how many files have stored text afterwards, or
+// null when a batch was refused (the files stored by earlier batches stay; storing again is safe).
+async function storeContents(snapshotId: string, archive: SourceArchive): Promise<number | null> {
+  const { batches } = contentBatches(
+    archive.manifest.map((entry) => entry.path),
+    archive.contents,
+  );
+  const supabase = await createClient();
+  let total = 0;
+  for (const batch of batches) {
+    const { data, error } = await supabase.rpc("store_snapshot_contents", { p_snapshot_id: snapshotId, p_files: batch });
+    if (error || !data[0]) return null;
+    total += data[0].stored + data[0].already_stored;
+  }
+  return total;
+}
+
+function contentsMessage(stored: number | null): string {
+  return stored === null
+    ? "The source text could not be stored for the AI assistant; upload the same archive again to retry."
+    : `Stored the text of ${stored} files for the AI assistant.`;
+}
+
 // Runs the structure analysis with a provider bound to this snapshot's recorded manifest and the upload's bytes.
 async function analyse(snapshotId: string, repositoryId: string, archive: SourceArchive): Promise<string | undefined> {
   const manifest = await loadRecordedManifest(snapshotId);
@@ -135,8 +164,10 @@ export async function ingestSnapshotArchive(repositoryId: string, snapshotId: st
   const snapshot = await readSnapshot(snapshotId, repositoryId);
   if (!snapshot) return { ok: false, error: PERMISSION_MESSAGE };
   if (snapshot.status === "PROCESSING") return { ok: false, error: BUSY_MESSAGE };
+  // A completed analysis is immutable; only a missing, pending or failed one can be (re-)run. A matching upload for an
+  // already analysed snapshot still stores any source text that is missing.
+  let analysedAlready = false;
   if (snapshot.status === "COMPLETED") {
-    // A completed analysis is immutable; only a missing, pending or failed one can be (re-)run.
     const supabase = await createClient();
     const { data: analysis, error } = await supabase
       .from("repository_structure_analyses")
@@ -144,8 +175,8 @@ export async function ingestSnapshotArchive(repositoryId: string, snapshotId: st
       .eq("snapshot_id", snapshot.id)
       .maybeSingle();
     if (error) return { ok: false, error: GENERIC_MESSAGE };
-    if (analysis?.status === "COMPLETED") return { ok: false, error: "This snapshot is already analysed." };
     if (analysis?.status === "PROCESSING") return { ok: false, error: "An analysis is already in progress." };
+    analysedAlready = analysis?.status === "COMPLETED";
   }
 
   // 1. Validate the whole upload before touching the snapshot. An invalid archive leaves everything unchanged.
@@ -173,8 +204,10 @@ export async function ingestSnapshotArchive(repositoryId: string, snapshotId: st
     if (!matchesManifest(archive, recorded)) {
       return { ok: false, error: "The archive does not match the files recorded for this snapshot, so it cannot be used to analyse it." };
     }
+    const stored = await storeContents(snapshot.id, archive);
+    if (analysedAlready) return { ok: true, message: `Source matched the recorded manifest. ${contentsMessage(stored)}` };
     const analysisError = await analyse(snapshot.id, repositoryId, archive);
-    return { ok: true, message: "Source matched the recorded manifest; structure analysis ran.", analysisError };
+    return { ok: true, message: `Source matched the recorded manifest; structure analysis ran. ${contentsMessage(stored)}`, analysisError };
   }
 
   // The manifest is signed with the server-only key; without it nothing can be recorded, so refuse before writing.
@@ -218,9 +251,11 @@ export async function ingestSnapshotArchive(repositoryId: string, snapshotId: st
     return await fail("Processing the archive failed. Try again.");
   }
 
-  // 5. Structure analysis (separate status). A failure here does not undo the recorded manifest.
+  // 5. Source text for later reading (best effort, see above), then structure analysis (separate status). A failure
+  //    in either does not undo the recorded manifest.
+  const stored = await storeContents(snapshot.id, archive);
   const analysisError = await analyse(snapshot.id, repositoryId, archive);
-  return { ok: true, message: summarize(archive), analysisError };
+  return { ok: true, message: `${summarize(archive)} ${contentsMessage(stored)}`, analysisError };
 }
 
 // Result line for the uploader: what was recorded and what was left out (and why). Paths are the user's own archive.

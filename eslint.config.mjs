@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Sample repositories used as AI evaluation input (uploaded as archives, never built or run by the app).
+    "fixtures/**",
   ]),
 ]);
 
