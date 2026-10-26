@@ -23,7 +23,59 @@ export type Database = {
           }
         },"public": {
           Tables: {
-            "department_members": {
+            "ai_run_events": {
+                  Row: {
+                    "created_at": string,"detail": Json | null,"id": number,"run_id": string,"state": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "created_at"?: string,"detail"?: Json | null,"id"?: never,"run_id": string,"state": string
+                  }
+                  Update: {
+                    "created_at"?: string,"detail"?: Json | null,"id"?: never,"run_id"?: string,"state"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "ai_run_events_run_id_fkey"
+      columns: ["run_id"]
+isOneToOne: false
+      referencedRelation: "ai_runs"
+      referencedColumns: ["id"]
+    }
+                  ]
+                },"ai_runs": {
+                  Row: {
+                    "attempts": number,"cached_input_tokens": number,"cancel_requested": boolean,"citations_dropped": number,"completed_at": string | null,"context_tokens_estimate": number,"correlation_id": string,"created_at": string,"error_category": string | null,"error_message": string | null,"estimated_cost_usd": number,"fallback_used": boolean,"id": string,"input": NonNullable<Json>,"input_tokens": number,"job_type": string,"model": string | null,"model_calls": number,"organization_id": string,"output": Json | null,"output_tokens": number,"project_id": string,"requested_by": string,"snapshot_id": string,"status": string,"thinking_tokens": number,"tier": string | null,"tool_calls": number,"updated_at": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "attempts"?: number,"cached_input_tokens"?: number,"cancel_requested"?: boolean,"citations_dropped"?: number,"completed_at"?: string | null,"context_tokens_estimate"?: number,"correlation_id"?: string,"created_at"?: string,"error_category"?: string | null,"error_message"?: string | null,"estimated_cost_usd"?: number,"fallback_used"?: boolean,"id"?: string,"input": NonNullable<Json>,"input_tokens"?: number,"job_type": string,"model"?: string | null,"model_calls"?: number,"organization_id": string,"output"?: Json | null,"output_tokens"?: number,"project_id": string,"requested_by": string,"snapshot_id": string,"status"?: string,"thinking_tokens"?: number,"tier"?: string | null,"tool_calls"?: number,"updated_at"?: string
+                  }
+                  Update: {
+                    "attempts"?: number,"cached_input_tokens"?: number,"cancel_requested"?: boolean,"citations_dropped"?: number,"completed_at"?: string | null,"context_tokens_estimate"?: number,"correlation_id"?: string,"created_at"?: string,"error_category"?: string | null,"error_message"?: string | null,"estimated_cost_usd"?: number,"fallback_used"?: boolean,"id"?: string,"input"?: NonNullable<Json>,"input_tokens"?: number,"job_type"?: string,"model"?: string | null,"model_calls"?: number,"organization_id"?: string,"output"?: Json | null,"output_tokens"?: number,"project_id"?: string,"requested_by"?: string,"snapshot_id"?: string,"status"?: string,"thinking_tokens"?: number,"tier"?: string | null,"tool_calls"?: number,"updated_at"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "ai_runs_organization_id_fkey"
+      columns: ["organization_id"]
+isOneToOne: false
+      referencedRelation: "organizations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "ai_runs_project_id_fkey"
+      columns: ["project_id"]
+isOneToOne: false
+      referencedRelation: "projects"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "ai_runs_snapshot_id_fkey"
+      columns: ["snapshot_id"]
+isOneToOne: false
+      referencedRelation: "repository_snapshots"
+      referencedColumns: ["id"]
+    }
+                  ]
+                },"department_members": {
                   Row: {
                     "created_at": string,"department_id": string,"id": string,"user_id": string
                   }
@@ -177,14 +229,14 @@ isOneToOne: false
                   ]
                 },"organization_settings": {
                   Row: {
-                    "assignment_mode": string,"organization_id": string,"updated_at": string,"updated_by": string | null
+                    "ai_enabled": boolean,"assignment_mode": string,"organization_id": string,"updated_at": string,"updated_by": string | null
                   }
                   ComputedFields: never
                   Insert: {
-                    "assignment_mode"?: string,"organization_id": string,"updated_at"?: string,"updated_by"?: string | null
+                    "ai_enabled"?: boolean,"assignment_mode"?: string,"organization_id": string,"updated_at"?: string,"updated_by"?: string | null
                   }
                   Update: {
-                    "assignment_mode"?: string,"organization_id"?: string,"updated_at"?: string,"updated_by"?: string | null
+                    "ai_enabled"?: boolean,"assignment_mode"?: string,"organization_id"?: string,"updated_at"?: string,"updated_by"?: string | null
                   }
                   Relationships: [
                     {
@@ -835,6 +887,9 @@ isOneToOne: false
               "analysis_id": string,"run_token": string
             }[]
                            },
+"can_see_project":
+{ Args: { "p_project_id": string }; Returns: boolean
+                           },
 "change_member_role":
 { Args: { "p_member_id": string,"p_role": string }; Returns: undefined
                            },
@@ -918,6 +973,9 @@ isOneToOne: false
               "analysis_id": string,"status": string
             }[]
                            },
+"finish_ai_run":
+{ Args: { "p_error_category": string,"p_error_message": string,"p_metrics": Json,"p_output": Json,"p_run_id": string,"p_status": string }; Returns: undefined
+                           },
 "generate_deadline_notifications":
 { Args: Record<PropertyKey, never>; Returns: number
                            },
@@ -985,6 +1043,9 @@ isOneToOne: false
 "reactivate_organization_member":
 { Args: { "p_member_id": string }; Returns: undefined
                            },
+"record_ai_run_state":
+{ Args: { "p_detail": Json,"p_run_id": string,"p_state": string }; Returns: undefined
+                           },
 "record_integration_result":
 { Args: { "p_integration_id": string,"p_message": string,"p_status": string,"p_sync_status": string }; Returns: undefined
                            },
@@ -1036,6 +1097,9 @@ isOneToOne: false
               "analysis_id": string,"degree": number,"end_line": number,"file_id": string,"id": string,"kind": string,"name": string,"path": string,"qualified_name": string,"signature": string,"start_column": number,"start_line": number,"visibility": string
             }[]
                            },
+"request_ai_run_cancel":
+{ Args: { "p_run_id": string }; Returns: boolean
+                           },
 "reset_structure_analysis":
 { Args: { "p_analysis_id": string }; Returns: {
               "analysis_id": string,"status": string
@@ -1056,6 +1120,9 @@ isOneToOne: false
 "select_jira_project":
 { Args: { "p_integration_id": string,"p_project_id": string,"p_project_key": string,"p_project_name": string }; Returns: undefined
                            },
+"set_ai_enabled":
+{ Args: { "p_enabled": boolean,"p_organization_id": string }; Returns: undefined
+                           },
 "set_assignment_mode":
 { Args: { "p_mode": string,"p_organization_id": string }; Returns: undefined
                            },
@@ -1073,6 +1140,11 @@ isOneToOne: false
                            },
 "slugify":
 { Args: { "p_fallback"?: string,"p_input": string }; Returns: string
+                           },
+"start_ai_run":
+{ Args: { "p_input": Json,"p_job_type": string,"p_snapshot_id": string }; Returns: {
+              "correlation_id": string,"run_id": string
+            }[]
                            },
 "store_snapshot_contents":
 { Args: { "p_files": Json,"p_snapshot_id": string }; Returns: {

@@ -24,7 +24,10 @@ import { type Citation, type JobType, type ProviderErrorCategory, type RunErrorC
 export const ORCHESTRATOR_LIMITS = {
   maxModelTurns: 10,
   maxToolCalls: 8,
-  deadlineMs: 90_000,
+  deadlineMs: 120_000,
+  // Once this share of the deadline is used, tools are switched off and the model is asked to answer with what it has:
+  // a late answer beats a timeout (measured free-tier calls take 16-24 s each).
+  answerNowAt: 0.6,
   perCallTimeoutMs: 60_000,
   maxCitationFileReads: 20,
 } as const;
@@ -200,6 +203,10 @@ export async function runJob(
     for (;;) {
       if (turns >= ORCHESTRATOR_LIMITS.maxModelTurns) throw new RunFailure("limit_exceeded");
       await checkpoint(true);
+      if (toolsEnabled && turns > 0 && deps.now() - started > deadlineMs * ORCHESTRATOR_LIMITS.answerNowAt) {
+        toolsEnabled = false;
+        turnsList.push({ role: "user", text: "Time is running out. Answer now with only the JSON object, using the evidence you have." });
+      }
       if (cursor.state !== "generating") await move("generating", { tier, model });
       const response = await callModel({
         system: job.systemPrompt,
@@ -301,6 +308,7 @@ export async function runJob(
       for (let attempt = 0; attempt < RETRY_POLICY.maxAttempts; attempt++) {
         await checkpoint(true);
         const remaining = deadlineMs - (deps.now() - started);
+        const cappedByDeadline = remaining < ORCHESTRATOR_LIMITS.perCallTimeoutMs;
         const signal = AbortSignal.any([options.signal, AbortSignal.timeout(Math.max(1, Math.min(ORCHESTRATOR_LIMITS.perCallTimeoutMs, remaining)))]);
         attempts++;
         const t0 = deps.now();
@@ -315,6 +323,8 @@ export async function runJob(
         } catch (error) {
           if (options.signal.aborted) throw new Stop("cancelled");
           const llm = error instanceof LlmError ? error : new LlmError("network", "provider call failed");
+          // The call's timeout was the run's remaining time, so this is the run deadline, not a slow provider.
+          if (llm.category === "timeout" && cappedByDeadline) throw new Stop("timed_out");
           last = llm;
           if (isRetryable(llm.category) && attempt < RETRY_POLICY.maxAttempts - 1) {
             const delay = backoffMillis(attempt, llm.retryAfterSeconds, deps.random ?? Math.random);
@@ -333,7 +343,8 @@ export async function runJob(
 }
 
 function withoutMeta(schema: Record<string, unknown>): Record<string, unknown> {
-  const { $schema: _ignored, ...rest } = schema;
+  const rest = { ...schema };
+  delete rest.$schema;
   return rest;
 }
 

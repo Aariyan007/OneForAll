@@ -153,6 +153,23 @@ describe("runJob", () => {
     assert.equal(outcome.status, "timed_out");
   });
 
+  it("switches to answer-now mode when most of the deadline is used, instead of failing", async () => {
+    const call = { toolCalls: [{ name: "search_code", args: { query: "Task" } }] };
+    // Each clock read advances 7 s: after the first tool round more than 60% of a 120 s deadline is gone.
+    const h = harness([call, call, (request) => (request.tools ? call : { text: answer() })], { clockStep: 7_000 });
+    const outcome = await runJob(h.deps, "code_qa", { question: "Where is findOverdue defined?" }, { signal: signal(), deadlineMs: 120_000 });
+    assert.equal(outcome.status, "completed");
+    const last = h.provider.requests.at(-1)!;
+    assert.equal(last.tools, undefined, "no tools once time is short");
+    assert.ok(last.turns.some((t) => t.role === "user" && /answer now/i.test(t.text)), "told to answer now");
+  });
+
+  it("reports a model call cut short by the run deadline as timed_out, not as a provider timeout", async () => {
+    const h = harness([new LlmError("timeout", "aborted")], { clockStep: 1_000 });
+    const outcome = await runJob(h.deps, "code_qa", { question: "Where is findOverdue defined?" }, { signal: signal(), deadlineMs: 20_000 });
+    assert.equal(outcome.status, "timed_out");
+  });
+
   it("checks generated tests for syntax and asks once for a fix", async () => {
     const generated = (content: string) =>
       JSON.stringify({ kind: "tests", language: "TypeScript", filename: "store.test.ts", content, notes: "", citations: [], confidence: "medium", missingContext: [] });

@@ -128,7 +128,8 @@ export type ToolName = keyof typeof TOOLS;
 
 export function toolDeclarations(names: readonly ToolName[]): LlmToolDeclaration[] {
   return names.map((name) => {
-    const { $schema: _ignored, ...parameters } = z.toJSONSchema(TOOLS[name].schema) as Record<string, unknown>;
+    const parameters = { ...(z.toJSONSchema(TOOLS[name].schema) as Record<string, unknown>) };
+    delete parameters.$schema;
     return { name, description: TOOLS[name].description, parameters };
   });
 }
