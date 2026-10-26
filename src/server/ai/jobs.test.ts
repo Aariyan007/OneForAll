@@ -78,6 +78,39 @@ describe("initial context", () => {
     assert.match(context.text, /<error_report>/);
   });
 
+  it("includes the target file's local imports when generating, so types are not invented", async () => {
+    const files = {
+      "src/tasks/priority.ts": 'import type { Task } from "./store";\nexport function score(t: Task) { return t.done ? 0 : 1; }\n',
+      "src/tasks/store.ts": "export type Task = { id: number; done: boolean };\n",
+      "src/other.ts": "export const unrelated = 1;\n",
+    };
+    const context = await JOBS.generate.buildContext({ kind: "tests", path: "src/tasks/priority.ts" }, memoryReader(files), 8000);
+    assert.match(context.text, /<file path="src\/tasks\/store.ts"/);
+    assert.match(context.text, /done: boolean/);
+    assert.doesNotMatch(context.text, /<file path="src\/other.ts"/);
+  });
+
+  it("resolves Python relative imports and ignores package imports", async () => {
+    const files = {
+      "scripts/report.py": "from .util import rate\nimport os\n\ndef summarize(t):\n    return rate(t)\n",
+      "scripts/util.py": "def rate(t):\n    return 0.0\n",
+    };
+    const context = await JOBS.code_review.buildContext({ mode: "review", path: "scripts/report.py" }, memoryReader(files), 8000);
+    assert.match(context.text, /<file path="scripts\/util.py"/);
+  });
+
+  it("follows the local imports of the files a question's search found", async () => {
+    const files = {
+      "src/tasks/store.ts": 'import { priorityScore } from "./priority";\nexport class TaskStore {\n  list() {\n    return [].sort((a, b) => priorityScore(b) - priorityScore(a));\n  }\n}\n',
+      "src/tasks/priority.ts": "export function priorityScore(task) {\n  return task.dueSoon ? 13 : 2;\n}\n",
+    };
+    const reader = memoryReader(files, {
+      symbols: [{ name: "list", kind: "METHOD", qualifiedName: "TaskStore.list", path: "src/tasks/store.ts", line: 3, signature: "list()" }],
+    });
+    const context = await JOBS.code_qa.buildContext({ question: "How does list() order the open tasks?" }, reader, 8000);
+    assert.match(context.text, /<file path="src\/tasks\/priority.ts"/);
+  });
+
   it("stays within the token budget", async () => {
     const big = memoryReader({ "src/big.ts": Array.from({ length: 400 }, () => "const findOverdue = 1; // padding padding padding").join("\n") });
     const context = await JOBS.code_qa.buildContext({ question: "where is findOverdue?" }, big, 500);

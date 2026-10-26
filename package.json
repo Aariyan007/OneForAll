@@ -14,7 +14,8 @@
     "db:reset": "supabase db reset",
     "db:types": "supabase gen types typescript --local > src/types/database.ts",
     "test": "tsx --test \"src/**/*.test.ts\" \"src/**/*.test.tsx\"",
-    "test:sql": "bash scripts/test-sql.sh"
+    "test:sql": "bash scripts/test-sql.sh",
+    "ai:eval": "tsx scripts/ai-eval.ts"
   },
   "dependencies": {
     "@google/genai": "^2.31.0",

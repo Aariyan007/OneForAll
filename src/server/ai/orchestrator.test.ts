@@ -188,6 +188,16 @@ describe("runJob", () => {
     assert.ok(Date.now() - started < 2000, "returned promptly");
   });
 
+  it("naive evaluation mode sends every stored file and offers no tools", async () => {
+    const files = { "src/tasks/store.ts": STORE, "src/unrelated.ts": "export const zebra = 1;\n" };
+    const h = harness([{ text: answer() }], { files });
+    const outcome = await runJob(h.deps, "code_qa", { question: "Where is findOverdue defined?" }, { signal: signal(), contextMode: "naive" });
+    assert.equal(outcome.status, "completed");
+    const request = h.provider.requests[0];
+    assert.equal(request.tools, undefined);
+    assert.match(JSON.stringify(request.turns[0]), /zebra/, "unrelated files are included too");
+  });
+
   it("checks generated tests for syntax and asks once for a fix", async () => {
     const generated = (content: string) =>
       JSON.stringify({ kind: "tests", language: "TypeScript", filename: "store.test.ts", content, notes: "", citations: [], confidence: "medium", missingContext: [] });

@@ -2,7 +2,7 @@ import { z } from "zod";
 import { estimateTokens, inputBudget } from "./budget";
 import { validateCitations } from "./citations";
 import { extractJson, lineCount } from "./context";
-import { JOBS, type JobContext } from "./jobs";
+import { JOBS, type JobContext, wholeRepositoryBlock } from "./jobs";
 import type { ModelRegistry } from "./models";
 import { type LlmProvider, type LlmRequest, type LlmResponse, type LlmTurn, LlmError } from "./provider/types";
 import { RETRY_POLICY, backoffMillis, isRetryable } from "./retry";
@@ -121,7 +121,8 @@ export async function runJob(
   deps: OrchestratorDeps,
   jobType: JobType,
   rawInput: unknown,
-  options: { signal: AbortSignal; deadlineMs?: number },
+  // contextMode "naive" (evaluation only): the whole repository in context and no tools, as a measured baseline.
+  options: { signal: AbortSignal; deadlineMs?: number; contextMode?: "retrieval" | "naive" },
 ): Promise<RunOutcome> {
   const job = JOBS[jobType];
   const started = deps.now();
@@ -190,6 +191,10 @@ export async function runJob(
       throw new RunFailure("invalid_input", error instanceof Error && error.message.length < 200 ? error.message : undefined);
     }
     contextTokensEstimate = estimateTokens(context.text);
+    if (options.contextMode === "naive") {
+      const whole = await wholeRepositoryBlock(deps.reader);
+      context = { ...context, text: `${context.text}\n${whole.text}`, lineCounts: new Map([...context.lineCounts, ...whole.lineCounts]) };
+    }
     contextOmitted = context.omitted;
     const lineCounts = new Map(context.lineCounts);
     tier = chooseTier({ job: jobType, promptChars: (job.promptChars as (i: unknown) => number)(input), contextTokens: contextTokensEstimate });
@@ -197,7 +202,7 @@ export async function runJob(
 
     const turnsList: LlmTurn[] = [{ role: "user", text: (job.userPrompt as (i: unknown, c: JobContext) => string)(input, context) }];
     const outputJsonSchema = withoutMeta(z.toJSONSchema(job.outputSchema) as Record<string, unknown>);
-    let toolsEnabled = true;
+    let toolsEnabled = options.contextMode !== "naive";
     let correctionUsed = false;
     let syntaxFixUsed = false;
     let forceSchema = false;

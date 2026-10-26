@@ -32,6 +32,23 @@ function dataBlock(safeInner: string): string {
   return `<repository_data note="${DATA_NOTE}">\n${safeInner}\n</repository_data>`;
 }
 
+// Evaluation baseline only: every stored text file of the snapshot, in full, as one data block (what a naive
+// "send the repository" integration does). Used to measure what retrieval saves; never used for user runs.
+export async function wholeRepositoryBlock(reader: RepoReader): Promise<{ text: string; lineCounts: Map<string, number> }> {
+  const lineCounts = new Map<string, number>();
+  const parts: string[] = [];
+  for (const file of await reader.listFiles()) {
+    if (!file.hasText) continue;
+    const content = await reader.readText(file.path);
+    if (content === null) continue;
+    const total = lineCount(content);
+    lineCounts.set(file.path, total);
+    const excerpt = numberedExcerpt(content, 1, total, Number.MAX_SAFE_INTEGER);
+    parts.push(`<file path="${escapeAttr(file.path)}" lines="1-${total}" total_lines="${total}">\n${escapeData(redactSecrets(excerpt.text).text)}\n</file>`);
+  }
+  return { text: dataBlock(parts.join("\n")), lineCounts };
+}
+
 export function wrapUntrusted(text: string): string {
   return dataBlock(escapeData(text));
 }
@@ -90,6 +107,13 @@ class ContextBuilder {
     return this.contents.get(path) ?? null;
   }
 
+  // The first lines of each local module `path` imports (where exported types and signatures usually are).
+  async wantImports(path: string, known: ReadonlySet<string>, lines = 120): Promise<void> {
+    const text = await this.content(path);
+    if (text === null) return;
+    for (const dependency of localImports(path, text, known)) this.wantRange(dependency, 1, lines);
+  }
+
   wantRange(path: string, start: number, end: number): void {
     const list = this.ranges.get(path) ?? [];
     list.push({ start: Math.max(1, start), end: Math.max(start, end) });
@@ -125,6 +149,54 @@ function escapeAttr(value: string): string {
   return value.replace(/[&"<>]/g, (c) => ({ "&": "&amp;", '"': "&quot;", "<": "&lt;", ">": "&gt;" })[c] ?? c);
 }
 
+// Local modules a file imports (relative JS/TS imports and requires, Python relative imports), resolved against the
+// snapshot's file list. Package imports are ignored: only code of this snapshot can be shown. Deterministic and cheap,
+// so generated tests and reviews see the real types of the modules a file depends on instead of guessing them.
+const JS_IMPORT = /(?:import|export)\s[^'"]*?from\s*['"](\.{1,2}\/[^'"]+)['"]|import\s*['"](\.{1,2}\/[^'"]+)['"]|require\(\s*['"](\.{1,2}\/[^'"]+)['"]\s*\)/g;
+const PY_IMPORT = /^\s*from\s+(\.+)([\w.]*)\s+import\s/gm;
+const JS_EXTENSIONS = ["", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", "/index.ts", "/index.tsx", "/index.js"];
+
+function normalizeJoin(dir: string, spec: string): string | null {
+  const parts = dir ? dir.split("/") : [];
+  for (const segment of spec.split("/")) {
+    if (segment === "" || segment === ".") continue;
+    if (segment === "..") {
+      if (parts.length === 0) return null;
+      parts.pop();
+    } else parts.push(segment);
+  }
+  return parts.join("/");
+}
+
+export function localImports(path: string, content: string, known: ReadonlySet<string>, max = 5): string[] {
+  const dir = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
+  const found: string[] = [];
+  const add = (candidate: string | null) => {
+    if (candidate && candidate !== path && known.has(candidate) && !found.includes(candidate)) found.push(candidate);
+  };
+  if (/\.py$/.test(path)) {
+    for (const match of content.matchAll(PY_IMPORT)) {
+      let base: string | null = dir;
+      for (let i = 1; i < match[1].length && base !== null; i++) base = normalizeJoin(base, "..");
+      if (base === null) continue;
+      const modulePath = match[2].replace(/\./g, "/");
+      if (modulePath) {
+        add(normalizeJoin(base, `${modulePath}.py`));
+        add(normalizeJoin(base, `${modulePath}/__init__.py`));
+      }
+    }
+  } else {
+    for (const match of content.matchAll(JS_IMPORT)) {
+      const spec = match[1] ?? match[2] ?? match[3];
+      const target = normalizeJoin(dir, spec);
+      if (target === null) continue;
+      const hit = JS_EXTENSIONS.map((ext) => `${target}${ext}`).find((candidate) => known.has(candidate));
+      add(hit ?? null);
+    }
+  }
+  return found.slice(0, max);
+}
+
 const STOPWORDS = new Set(
   "the and for with that this from what where when which how does into are was were has have had not but you your our their its can could should would will about there here then than them they his her him who whom why all any each few more most other some such only own same too very just also use used using code file files function functions class method methods test tests line lines".split(
     " ",
@@ -145,11 +217,27 @@ async function fileList(builder: ContextBuilder, reader: RepoReader): Promise<vo
   builder.add(`<file_list count="${files.length}">\n${escapeData(shown.join("\n"))}${more}\n</file_list>`);
 }
 
+// Symbol and text hits for the request's keywords, then the local imports of the two files hit first (an answer often
+// depends on a helper defined one module away, e.g. a sort comparator). Measured in docs/testing/AI_EVAL_RESULTS.md.
 async function searchHits(builder: ContextBuilder, reader: RepoReader, text: string): Promise<void> {
+  const hitFiles: string[] = [];
+  const note = (path: string) => {
+    if (!hitFiles.includes(path)) hitFiles.push(path);
+  };
   for (const word of keywords(text)) {
-    for (const symbol of await reader.searchSymbols(word, 3)) builder.wantRange(symbol.path, symbol.line - 2, symbol.line + 25);
-    if (word.length >= 3) for (const hit of await reader.searchCode(word, 3)) builder.wantRange(hit.path, hit.line - 8, hit.line + 8);
+    for (const symbol of await reader.searchSymbols(word, 3)) {
+      builder.wantRange(symbol.path, symbol.line - 2, symbol.line + 25);
+      note(symbol.path);
+    }
+    if (word.length >= 3) {
+      for (const hit of await reader.searchCode(word, 3)) {
+        builder.wantRange(hit.path, hit.line - 8, hit.line + 8);
+        note(hit.path);
+      }
+    }
   }
+  const known = new Set((await reader.listFiles()).map((f) => f.path));
+  for (const path of hitFiles.slice(0, 2)) await builder.wantImports(path, known, 60);
 }
 
 // ---------------------------------------------------------------- job specifications
@@ -267,7 +355,10 @@ Shape: {"answer": string (markdown allowed), "citations": [${CITATION_SHAPE}], "
   async buildContext(input, reader, budget) {
     const b = new ContextBuilder(reader, budget);
     await fileList(b, reader);
-    if (input.focusPath) b.wantRange(input.focusPath, 1, MAX_EXCERPT_LINES);
+    if (input.focusPath) {
+      b.wantRange(input.focusPath, 1, MAX_EXCERPT_LINES);
+      await b.wantImports(input.focusPath, new Set((await reader.listFiles()).map((f) => f.path)));
+    }
     await searchHits(b, reader, input.question);
     await b.flushRanges();
     return b.result();
@@ -322,6 +413,7 @@ Shape: {"summary": string, "findings": [{"title": string, "severity": "info"|"lo
     if (input.mode === "review") {
       const start = input.startLine ?? 1;
       b.wantRange(input.path, start, input.endLine ?? start + MAX_EXCERPT_LINES - 1);
+      await b.wantImports(input.path, new Set((await reader.listFiles()).map((f) => f.path)));
       await b.flushRanges();
       if ((await b.content(input.path)) === null) throw new Error("That file is not in this snapshot, or its text is not stored.");
       return b.result();
@@ -357,6 +449,7 @@ Shape: {"kind": "tests"|"docs", "language": string, "filename": string, "content
   async buildContext(input, reader, budget) {
     const b = new ContextBuilder(reader, budget);
     b.wantRange(input.path, 1, MAX_EXCERPT_LINES);
+    await b.wantImports(input.path, new Set((await reader.listFiles()).map((f) => f.path)));
     if (input.symbol) for (const s of await reader.searchSymbols(input.symbol, 3)) b.wantRange(s.path, s.line - 2, s.line + 40);
     await b.flushRanges();
     if ((await b.content(input.path)) === null) throw new Error("That file is not in this snapshot, or its text is not stored.");
