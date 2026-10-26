@@ -33,6 +33,9 @@ Migrations not yet committed in this phase: `20261020000001_repository_graph_rea
 | `NEXT_PUBLIC_SITE_URL` | server | no | yes | absolute app origin, for auth email links (local: `http://localhost:3000`) |
 | `STRUCTURE_PERSIST_KEY` | server only | **yes** | yes, for snapshot ingestion and structure analysis | 32+ random characters; the same value goes in Vault |
 | `INTEGRATION_ENCRYPTION_KEY` | server only | **yes** | only to store GitHub or Jira credentials | 32+ random characters; **not** stored in Vault |
+| `APP_URL` | server only, read at runtime | no | no | public origin for invitation links (a tunnel or deployed URL); empty: the inviter's origin, then `NEXT_PUBLIC_SITE_URL` |
+| `SMTP_USER`, `SMTP_PASSWORD` | server only | **yes** (`SMTP_PASSWORD`) | only to email invitations | Gmail address and a Google app password (section 4a); empty: the inviter copies the link instead |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_FROM` | server only | no | no | defaults: `smtp.gmail.com`, `465`, `OneForAll <SMTP_USER>` |
 
 - Server-only variables must never get a `NEXT_PUBLIC_` prefix.
 - No Supabase service-role key is used anywhere. Do not add one.
@@ -64,6 +67,13 @@ select vault.create_secret('<the same value>', 'structure_persist_key', 'Structu
 - If it is missing, the Integrations page says integrations are not configured. Public GitHub imports still work.
 - **Changing or losing it** makes stored tokens unreadable. Admins then enter them again. No other data is affected.
 - Use a different value in every environment (local, staging, production).
+
+## 4a. Invitation email (Gmail SMTP, optional)
+1. Turn on 2-Step Verification for the Google account that sends the email.
+2. Create an app password at <https://myaccount.google.com/apppasswords> (name it `OneForAll`). Google shows 16 characters once.
+3. In `.env.local`: `SMTP_USER=<that Gmail address>` and `SMTP_PASSWORD=<the app password>` (spaces are ignored). Restart the app.
+4. Set `APP_URL` to the URL invitees open (for example the tunnel URL), or links point to the inviter's own origin.
+5. Gmail limits sending to about 500 messages a day. Revoke the app password at the same page to stop sending.
 
 ## 5. GitHub (optional; needed for private repositories or more than 60 requests per hour)
 Public repositories need nothing. For a token:

@@ -47,8 +47,12 @@ export function InviteMemberForm({ organizationId, roles }: { organizationId: st
       {state.inviteLink && (
         <Alert tone="success" title={state.success}>
           <span className="block">
-            No email provider is configured, so send this one-time link to {state.invitedEmail} yourself. It expires in 7 days and only
-            works for an account with that email address. It is shown once.
+            {state.emailDelivery === "sent"
+              ? `An email with this link was sent to ${state.invitedEmail}. If it does not arrive, copy the link and send it yourself.`
+              : state.emailDelivery === "failed"
+                ? `The email to ${state.invitedEmail} could not be sent, so send this one-time link yourself.`
+                : `No email provider is configured, so send this one-time link to ${state.invitedEmail} yourself.`}{" "}
+            It expires in 7 days and only works for an account with that email address. It is shown once.
           </span>
           <span className="mt-2 flex flex-col gap-2 sm:flex-row">
             <input readOnly value={state.inviteLink} aria-label="Invitation link" className={cx(CONTROL, "font-mono text-[12px]")} onFocus={(e) => e.currentTarget.select()} />
