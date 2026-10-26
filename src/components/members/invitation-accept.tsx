@@ -104,6 +104,9 @@ export function InvitationAccept({ signedIn, email }: { signedIn: boolean; email
                 const result = await acceptInvitation(token);
                 if (result.ok) {
                   forget();
+                  // A full load on purpose: the app layout (workspace switcher, nav) must re-read the new membership,
+                  // and client navigation keeps the old layout (see docs/rbac-workforce.md on reloads after changes).
+                  // eslint-disable-next-line @next/next/no-location-assign-relative-destination
                   window.location.assign(`/organizations/${result.organizationId}/departments`);
                 } else setError(result.error);
               })

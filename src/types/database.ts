@@ -906,6 +906,9 @@ isOneToOne: false
 "has_org_role":
 { Args: { "p_org_id": string,"p_roles": (string)[] }; Returns: boolean
                            },
+"health_check":
+{ Args: Record<PropertyKey, never>; Returns: boolean
+                           },
 "import_organization_structure":
 { Args: { "p_apply": boolean,"p_kind": string,"p_organization_id": string,"p_rows": Json }; Returns: {
               "message": string,"name": string,"outcome": string,"row_number": number

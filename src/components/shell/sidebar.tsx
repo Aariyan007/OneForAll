@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { Avatar } from "@/components/ui/data";
-import { IconChevronsUpDown, IconClose, IconLogo, IconPlus, IconSettings } from "@/components/ui/icons";
+import { IconChevronsUpDown, IconClose, IconLogo, IconPlus } from "@/components/ui/icons";
 import { ROLE_LABELS, isOrgRole } from "@/lib/authz/permissions";
 import { cx } from "@/lib/cx";
 import type { ShellOrganization } from "./app-shell";
@@ -83,20 +83,6 @@ export function Sidebar({
             </div>
           ))}
         </nav>
-
-        {/* footer */}
-        <div className="border-t border-border p-3 md:p-2 lg:p-3">
-          <span
-            title="Settings — coming soon"
-            className="flex h-8 items-center gap-2.5 rounded-md px-2 text-[13px] text-fg-3/70 md:justify-center lg:justify-start"
-          >
-            <IconSettings size={16} />
-            <span className="md:hidden lg:inline">Settings</span>
-            <span className="ml-auto rounded border border-border px-1.5 text-[10px] font-medium tracking-wide text-fg-3 md:hidden lg:inline">
-              SOON
-            </span>
-          </span>
-        </div>
       </aside>
     </>
   );

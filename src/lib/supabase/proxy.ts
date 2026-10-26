@@ -1,16 +1,8 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { publicEnv } from "@/lib/env";
+import { isPublicPath } from "@/lib/public-paths";
 import type { Database } from "@/types/database";
-
-// /invitations is public: it explains the invitation and offers sign-in; accepting still requires a session.
-const PUBLIC_PATHS = ["/", "/login", "/signup", "/auth", "/invitations"];
-
-function isPublicPath(pathname: string) {
-  return PUBLIC_PATHS.some(
-    (path) => pathname === path || (path !== "/" && pathname.startsWith(`${path}/`)),
-  );
-}
 
 // Refreshes the Supabase session cookie on every request and redirects
 // signed-out users away from protected pages. This is an optimistic check only:
