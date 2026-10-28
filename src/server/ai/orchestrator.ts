@@ -377,7 +377,7 @@ async function filterLocations(
   lineCounts: Map<string, number>,
   reader: RepoReader,
 ): Promise<{ output: Record<string, unknown>; dropped: number }> {
-  const listKey = jobType === "requirement_trace" ? "links" : jobType === "code_review" || jobType === "bug_scan" ? "findings" : "citations";
+  const listKey = jobType === "requirement_trace" ? "links" : jobType === "code_review" || jobType === "bug_scan" ? "findings" : jobType === "bug_fix_plan" ? "edits" : "citations";
   const items = (output[listKey] as (Citation & Record<string, unknown>)[]) ?? [];
   const unknownPaths = [...new Set(items.map((i) => i.path))].filter((p) => !lineCounts.has(p) && isSafeRepoPath(p)).slice(0, ORCHESTRATOR_LIMITS.maxCitationFileReads);
   for (const path of unknownPaths) {

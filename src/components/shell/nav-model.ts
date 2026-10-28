@@ -45,6 +45,7 @@ export function paths(ctx: RouteContext) {
   return {
     orgOverview: org ? `${org}/overview` : undefined,
     settings: org ? `${org}/settings` : undefined,
+    orgBugs: org ? `${org}/bugs` : undefined,
     members: org ? `${org}/members` : undefined,
     workforce: org ? `${org}/workforce` : undefined,
     departments: org ? `${org}/departments` : undefined,
@@ -67,6 +68,7 @@ export function buildNav(ctx: RouteContext, role?: string): NavSection[] {
       items: [
         { key: "dashboard", label: "Dashboard", href: "/dashboard", icon: "dashboard", match: "exact" },
         { key: "my-work", label: "My work", href: "/my-work", icon: "task", match: "exact" },
+        { key: "my-bugs", label: "My bugs", href: "/my-bugs", icon: "alert", match: "exact" },
         { key: "notifications", label: "Notifications", href: "/notifications", icon: "bell", match: "exact" },
         { key: "organizations", label: "Organizations", href: "/organizations/new", icon: "building", match: "exact" },
       ],
@@ -75,6 +77,7 @@ export function buildNav(ctx: RouteContext, role?: string): NavSection[] {
       title: "Workspace",
       items: [
         { key: "org-overview", label: "Overview", href: p.orgOverview, icon: "building", hint: "Open an organization", match: "exact" },
+        { key: "org-bugs", label: "Repos & bugs", href: p.orgBugs, icon: "alert", hint: "Open an organization", match: "exact" },
         { key: "members", label: "Members", href: p.members, icon: "users", hint: "Open an organization", match: "exact" },
         { key: "workforce", label: "Workforce", href: p.workforce, icon: "sparkle", hint: "Open an organization", match: "prefix" },
         { key: "departments", label: "Departments", href: p.departments, icon: "layers", hint: "Open an organization", match: "exact" },

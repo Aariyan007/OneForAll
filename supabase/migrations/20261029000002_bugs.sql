@@ -263,7 +263,7 @@ declare
 begin
   if (select auth.uid()) is null then raise exception 'Not authenticated' using errcode = '28000'; end if;
   select * into v_scan from public.repository_bug_scans x where x.id = p_scan_id for update;
-  if v_scan.id is null or private.caller_org_role(v_scan.organization_id) not in ('OWNER', 'ADMIN') then
+  if v_scan.id is null or coalesce(private.caller_org_role(v_scan.organization_id), '') not in ('OWNER', 'ADMIN') then
     raise exception 'Scan not found' using errcode = '42501';
   end if;
   if v_scan.status <> 'RUNNING' then raise exception 'The scan is not running' using errcode = '55000'; end if;
@@ -335,7 +335,7 @@ begin
   if (select auth.uid()) is null then raise exception 'Not authenticated' using errcode = '28000'; end if;
   if p_status not in ('FAILED', 'CANCELLED') then raise exception 'Invalid status' using errcode = '22023'; end if;
   select * into v_scan from public.repository_bug_scans x where x.id = p_scan_id for update;
-  if v_scan.id is null or private.caller_org_role(v_scan.organization_id) not in ('OWNER', 'ADMIN') then raise exception 'Scan not found' using errcode = '42501'; end if;
+  if v_scan.id is null or coalesce(private.caller_org_role(v_scan.organization_id), '') not in ('OWNER', 'ADMIN') then raise exception 'Scan not found' using errcode = '42501'; end if;
   if v_scan.status <> 'RUNNING' then return; end if;
   update public.repository_bug_scans x set status = case when cardinality(x.completed_batches) > 0 and p_status = 'FAILED' then 'PARTIAL' else p_status end,
     error_message = left(p_error, 500), completed_at = now(), updated_at = now() where x.id = p_scan_id;
@@ -351,7 +351,7 @@ declare v_scan public.repository_bug_scans;
 begin
   if (select auth.uid()) is null then raise exception 'Not authenticated' using errcode = '28000'; end if;
   select * into v_scan from public.repository_bug_scans x where x.id = p_scan_id for update;
-  if v_scan.id is null or private.caller_org_role(v_scan.organization_id) not in ('OWNER', 'ADMIN') then raise exception 'Scan not found' using errcode = '42501'; end if;
+  if v_scan.id is null or coalesce(private.caller_org_role(v_scan.organization_id), '') not in ('OWNER', 'ADMIN') then raise exception 'Scan not found' using errcode = '42501'; end if;
   if v_scan.status = 'RUNNING' then return; end if;
   if v_scan.status = 'COMPLETED' or cardinality(v_scan.completed_batches) >= v_scan.batches_total then raise exception 'Nothing left to scan' using errcode = '55000'; end if;
   begin

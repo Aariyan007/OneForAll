@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { AutoAssignButton } from "@/components/bugs/auto-assign-button";
 import { BugScanPanel, type PublicScan } from "@/components/bugs/bug-scan-panel";
 import { BugSeverityBadge, BugStatusBadge, categoryLabel } from "@/components/bugs/badges";
 import { Badge } from "@/components/ui/badge";
@@ -74,6 +75,17 @@ export default async function BugsPage({
             <Card className="p-4 text-[13px] text-fg-2">
               Scans are started by organization owners and admins.{" "}
               {scan ? `Last scan: ${scan.status.toLowerCase()}, ${scan.bugs_found} findings.` : "No scan has been run on the latest import yet."}
+            </Card>
+          )}
+
+          {data.canManage && counts.unassigned > 0 && (
+            <Card className="p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <p className="text-[13px] text-fg-2">
+                  {counts.unassigned} open bug{counts.unassigned === 1 ? " has" : "s have"} no owner. Auto-assign ranks eligible people by skills, team, workload and availability, and shows why.
+                </p>
+                <AutoAssignButton endpoint={`${projectPath}/bugs/assign`} unassigned={counts.unassigned} />
+              </div>
             </Card>
           )}
 

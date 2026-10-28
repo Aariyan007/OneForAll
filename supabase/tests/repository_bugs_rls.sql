@@ -109,6 +109,20 @@ begin
   perform public.record_bug_scan_batch(scan2, 0, '[]'::jsonb, false, 0, 0, 0, null);
   select status into st from public.repository_bug_scans where id = scan2; assert st = 'COMPLETED', 'retry completes the scan';
 
+  -- An owner of ANOTHER organization is not a member here: every scan function must say "not found" (a NULL role must
+  -- never slip through a NOT IN check).
+  perform public.zz_as(owner1);
+  select public.start_bug_scan(s1, '{"batches":[{"paths":["a.ts"]},{"paths":["a.ts"]}]}'::jsonb, 1, 1) into scan;
+  perform public.zz_as(owner2);
+  begin perform public.record_bug_scan_batch(scan, 0, '[]'::jsonb, false, 0, 0, 0, null); st := 'none'; exception when others then st := sqlstate; end;
+  assert st = '42501', 'outsider cannot record batches (got ' || st || ')';
+  begin perform public.finish_bug_scan(scan, 'CANCELLED', null); st := 'none'; exception when others then st := sqlstate; end;
+  assert st = '42501', 'outsider cannot cancel scans (got ' || st || ')';
+  begin perform public.resume_bug_scan(scan); st := 'none'; exception when others then st := sqlstate; end;
+  assert st = '42501', 'outsider cannot resume scans (got ' || st || ')';
+  perform public.zz_as(owner1);
+  perform public.finish_bug_scan(scan, 'CANCELLED', null);
+
   -- Reads: owner sees it; the team-A member sees it; the member of another team and the other organization do not.
   select id into bug from public.repository_bugs limit 1;
   perform public.zz_as(ma); select count(*) into n from public.repository_bugs; assert n = 1, 'team member sees the bug';

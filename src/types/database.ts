@@ -381,6 +381,64 @@ isOneToOne: false
       referencedColumns: ["id"]
     }
                   ]
+                },"repository_bug_fix_files": {
+                  Row: {
+                    "base_hash": string,"fix_id": string,"patched_content": string,"patched_hash": string,"path": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "base_hash": string,"fix_id": string,"patched_content": string,"patched_hash": string,"path": string
+                  }
+                  Update: {
+                    "base_hash"?: string,"fix_id"?: string,"patched_content"?: string,"patched_hash"?: string,"path"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "repository_bug_fix_files_fix_id_fkey"
+      columns: ["fix_id"]
+isOneToOne: false
+      referencedRelation: "repository_bug_fixes"
+      referencedColumns: ["id"]
+    }
+                  ]
+                },"repository_bug_fixes": {
+                  Row: {
+                    "bug_id": string,"created_at": string,"created_by": string | null,"decided_at": string | null,"decided_by": string | null,"decision_note": string | null,"diff": string,"edits": NonNullable<Json>,"id": string,"model": string | null,"organization_id": string,"plan": NonNullable<Json>,"project_id": string,"run_id": string | null,"status": string,"updated_at": string,"validation": Json | null,"version": number
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "bug_id": string,"created_at"?: string,"created_by"?: string | null,"decided_at"?: string | null,"decided_by"?: string | null,"decision_note"?: string | null,"diff": string,"edits": NonNullable<Json>,"id"?: string,"model"?: string | null,"organization_id": string,"plan": NonNullable<Json>,"project_id": string,"run_id"?: string | null,"status"?: string,"updated_at"?: string,"validation"?: Json | null,"version": number
+                  }
+                  Update: {
+                    "bug_id"?: string,"created_at"?: string,"created_by"?: string | null,"decided_at"?: string | null,"decided_by"?: string | null,"decision_note"?: string | null,"diff"?: string,"edits"?: NonNullable<Json>,"id"?: string,"model"?: string | null,"organization_id"?: string,"plan"?: NonNullable<Json>,"project_id"?: string,"run_id"?: string | null,"status"?: string,"updated_at"?: string,"validation"?: Json | null,"version"?: number
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "repository_bug_fixes_bug_id_fkey"
+      columns: ["bug_id"]
+isOneToOne: false
+      referencedRelation: "repository_bugs"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "repository_bug_fixes_organization_id_fkey"
+      columns: ["organization_id"]
+isOneToOne: false
+      referencedRelation: "organizations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "repository_bug_fixes_project_id_fkey"
+      columns: ["project_id"]
+isOneToOne: false
+      referencedRelation: "projects"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "repository_bug_fixes_run_id_fkey"
+      columns: ["run_id"]
+isOneToOne: false
+      referencedRelation: "ai_runs"
+      referencedColumns: ["id"]
+    }
+                  ]
                 },"repository_bug_scans": {
                   Row: {
                     "batches_total": number,"bugs_found": number,"bugs_new": number,"completed_at": string | null,"completed_batches": (number)[],"cost_usd": number,"created_at": string,"error_message": string | null,"failed_batches": (number)[],"files_planned": number,"files_total": number,"id": string,"input_tokens": number,"organization_id": string,"output_tokens": number,"plan": NonNullable<Json>,"project_id": string,"snapshot_id": string,"started_by": string | null,"status": string,"updated_at": string
@@ -996,6 +1054,9 @@ isOneToOne: false
             "accept_organization_invitation":
 { Args: { "p_token": string }; Returns: string
                            },
+"add_bug_comment":
+{ Args: { "p_body": string,"p_bug_id": string }; Returns: undefined
+                           },
 "add_project_team":
 { Args: { "p_project_id": string,"p_team_id": string }; Returns: undefined
                            },
@@ -1007,6 +1068,9 @@ isOneToOne: false
                            },
 "add_task_link":
 { Args: { "p_label": string,"p_task_id": string,"p_url": string }; Returns: string
+                           },
+"assign_bug":
+{ Args: { "p_assignee": string,"p_bug_id": string,"p_reason": string,"p_source": string }; Returns: undefined
                            },
 "assign_task":
 { Args: { "p_assignee": string,"p_expected_assignee": string,"p_mode"?: string,"p_reason"?: string,"p_task_id": string }; Returns: undefined
@@ -1086,6 +1150,9 @@ isOneToOne: false
               "department_id": string,"description": string,"id": string,"name": string,"slug": string
             }[]
                            },
+"decide_bug_fix":
+{ Args: { "p_decision": string,"p_fix_id": string,"p_note": string }; Returns: undefined
+                           },
 "decline_task_assignment":
 { Args: { "p_reason": string,"p_task_id": string }; Returns: undefined
                            },
@@ -1146,6 +1213,11 @@ isOneToOne: false
 "is_project_collaborator":
 { Args: { "p_project_id": string }; Returns: boolean
                            },
+"list_bug_assignment_candidates":
+{ Args: { "p_project_id": string }; Returns: {
+              "availability": string,"display_name": string,"email": string,"job_title": string,"on_project_team": boolean,"open_bugs": number,"open_tasks": number,"role": string,"skills": (string)[],"team_id": string,"user_id": string
+            }[]
+                           },
 "list_my_invitations":
 { Args: Record<PropertyKey, never>; Returns: {
               "expires_at": string,"invitation_id": string,"invited_by_name": string,"organization_name": string,"role": string
@@ -1177,11 +1249,17 @@ isOneToOne: false
               "id": string,"relationships_count": number,"status": string,"symbols_count": number
             }[]
                            },
+"propose_bug_fix":
+{ Args: { "p_bug_id": string,"p_diff": string,"p_edits": Json,"p_files": Json,"p_model": string,"p_plan": Json,"p_run_id": string }; Returns: string
+                           },
 "reactivate_organization_member":
 { Args: { "p_member_id": string }; Returns: undefined
                            },
 "record_ai_run_state":
 { Args: { "p_detail": Json,"p_run_id": string,"p_state": string }; Returns: undefined
+                           },
+"record_bug_fix_validation":
+{ Args: { "p_fix_id": string,"p_validation": Json }; Returns: undefined
                            },
 "record_bug_scan_batch":
 { Args: { "p_batch_index": number,"p_cost_usd": number,"p_error": string,"p_failed": boolean,"p_findings": Json,"p_input_tokens": number,"p_output_tokens": number,"p_scan_id": string }; Returns: Json
@@ -1313,8 +1391,14 @@ isOneToOne: false
               "display_name": string,"user_id": string
             }[]
                            },
+"transition_bug":
+{ Args: { "p_bug_id": string,"p_note": string,"p_to": string }; Returns: undefined
+                           },
 "transition_task":
 { Args: { "p_reason"?: string,"p_status": string,"p_task_id": string }; Returns: undefined
+                           },
+"unassign_bug":
+{ Args: { "p_bug_id": string,"p_reason": string }; Returns: undefined
                            },
 "update_workforce_profile":
 { Args: { "p_clear_team"?: boolean,"p_department_id": string,"p_employee_code": string,"p_full_name": string,"p_job_title": string,"p_profile_id": string,"p_team_id": string }; Returns: undefined
