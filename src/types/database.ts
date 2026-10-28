@@ -361,6 +361,108 @@ isOneToOne: true
       referencedColumns: ["id"]
     }
                   ]
+                },"repository_bug_events": {
+                  Row: {
+                    "actor_id": string | null,"bug_id": string,"created_at": string,"details": NonNullable<Json>,"from_status": string | null,"id": number,"to_status": string | null,"type": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "actor_id"?: string | null,"bug_id": string,"created_at"?: string,"details"?: NonNullable<Json>,"from_status"?: string | null,"id"?: never,"to_status"?: string | null,"type": string
+                  }
+                  Update: {
+                    "actor_id"?: string | null,"bug_id"?: string,"created_at"?: string,"details"?: NonNullable<Json>,"from_status"?: string | null,"id"?: never,"to_status"?: string | null,"type"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "repository_bug_events_bug_id_fkey"
+      columns: ["bug_id"]
+isOneToOne: false
+      referencedRelation: "repository_bugs"
+      referencedColumns: ["id"]
+    }
+                  ]
+                },"repository_bug_scans": {
+                  Row: {
+                    "batches_total": number,"bugs_found": number,"bugs_new": number,"completed_at": string | null,"completed_batches": (number)[],"cost_usd": number,"created_at": string,"error_message": string | null,"failed_batches": (number)[],"files_planned": number,"files_total": number,"id": string,"input_tokens": number,"organization_id": string,"output_tokens": number,"plan": NonNullable<Json>,"project_id": string,"snapshot_id": string,"started_by": string | null,"status": string,"updated_at": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "batches_total": number,"bugs_found"?: number,"bugs_new"?: number,"completed_at"?: string | null,"completed_batches"?: (number)[],"cost_usd"?: number,"created_at"?: string,"error_message"?: string | null,"failed_batches"?: (number)[],"files_planned": number,"files_total": number,"id"?: string,"input_tokens"?: number,"organization_id": string,"output_tokens"?: number,"plan": NonNullable<Json>,"project_id": string,"snapshot_id": string,"started_by"?: string | null,"status"?: string,"updated_at"?: string
+                  }
+                  Update: {
+                    "batches_total"?: number,"bugs_found"?: number,"bugs_new"?: number,"completed_at"?: string | null,"completed_batches"?: (number)[],"cost_usd"?: number,"created_at"?: string,"error_message"?: string | null,"failed_batches"?: (number)[],"files_planned"?: number,"files_total"?: number,"id"?: string,"input_tokens"?: number,"organization_id"?: string,"output_tokens"?: number,"plan"?: NonNullable<Json>,"project_id"?: string,"snapshot_id"?: string,"started_by"?: string | null,"status"?: string,"updated_at"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "repository_bug_scans_organization_id_fkey"
+      columns: ["organization_id"]
+isOneToOne: false
+      referencedRelation: "organizations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "repository_bug_scans_project_id_fkey"
+      columns: ["project_id"]
+isOneToOne: false
+      referencedRelation: "projects"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "repository_bug_scans_snapshot_id_fkey"
+      columns: ["snapshot_id"]
+isOneToOne: false
+      referencedRelation: "repository_snapshots"
+      referencedColumns: ["id"]
+    }
+                  ]
+                },"repository_bugs": {
+                  Row: {
+                    "assigned_at": string | null,"assigned_by": string | null,"assigned_to": string | null,"assignment_reason": string | null,"assignment_source": string | null,"category": string,"confidence": number,"created_at": string,"description": string,"end_line": number,"evidence": string,"file_id": string | null,"file_path": string,"fingerprint": string,"first_scan_id": string | null,"id": string,"last_scan_id": string | null,"organization_id": string,"project_id": string,"severity": string,"severity_reason": string,"snapshot_id": string,"start_line": number,"status": string,"suggested_fix": string,"times_seen": number,"title": string,"updated_at": string,"validation_steps": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "assigned_at"?: string | null,"assigned_by"?: string | null,"assigned_to"?: string | null,"assignment_reason"?: string | null,"assignment_source"?: string | null,"category": string,"confidence": number,"created_at"?: string,"description": string,"end_line": number,"evidence": string,"file_id"?: string | null,"file_path": string,"fingerprint": string,"first_scan_id"?: string | null,"id"?: string,"last_scan_id"?: string | null,"organization_id": string,"project_id": string,"severity": string,"severity_reason": string,"snapshot_id": string,"start_line": number,"status"?: string,"suggested_fix"?: string,"times_seen"?: number,"title": string,"updated_at"?: string,"validation_steps"?: string
+                  }
+                  Update: {
+                    "assigned_at"?: string | null,"assigned_by"?: string | null,"assigned_to"?: string | null,"assignment_reason"?: string | null,"assignment_source"?: string | null,"category"?: string,"confidence"?: number,"created_at"?: string,"description"?: string,"end_line"?: number,"evidence"?: string,"file_id"?: string | null,"file_path"?: string,"fingerprint"?: string,"first_scan_id"?: string | null,"id"?: string,"last_scan_id"?: string | null,"organization_id"?: string,"project_id"?: string,"severity"?: string,"severity_reason"?: string,"snapshot_id"?: string,"start_line"?: number,"status"?: string,"suggested_fix"?: string,"times_seen"?: number,"title"?: string,"updated_at"?: string,"validation_steps"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "repository_bugs_file_id_fkey"
+      columns: ["file_id"]
+isOneToOne: false
+      referencedRelation: "repository_files"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "repository_bugs_first_scan_id_fkey"
+      columns: ["first_scan_id"]
+isOneToOne: false
+      referencedRelation: "repository_bug_scans"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "repository_bugs_last_scan_id_fkey"
+      columns: ["last_scan_id"]
+isOneToOne: false
+      referencedRelation: "repository_bug_scans"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "repository_bugs_organization_id_fkey"
+      columns: ["organization_id"]
+isOneToOne: false
+      referencedRelation: "organizations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "repository_bugs_project_id_fkey"
+      columns: ["project_id"]
+isOneToOne: false
+      referencedRelation: "projects"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "repository_bugs_snapshot_id_fkey"
+      columns: ["snapshot_id"]
+isOneToOne: false
+      referencedRelation: "repository_snapshots"
+      referencedColumns: ["id"]
+    }
+                  ]
                 },"repository_file_contents": {
                   Row: {
                     "byte_size": number,"content": string,"created_at": string,"file_id": string,"snapshot_id": string
@@ -1008,6 +1110,9 @@ isOneToOne: false
 "finish_ai_run":
 { Args: { "p_error_category": string,"p_error_message": string,"p_metrics": Json,"p_output": Json,"p_run_id": string,"p_status": string }; Returns: undefined
                            },
+"finish_bug_scan":
+{ Args: { "p_error": string,"p_scan_id": string,"p_status": string }; Returns: undefined
+                           },
 "generate_deadline_notifications":
 { Args: Record<PropertyKey, never>; Returns: number
                            },
@@ -1078,6 +1183,9 @@ isOneToOne: false
 "record_ai_run_state":
 { Args: { "p_detail": Json,"p_run_id": string,"p_state": string }; Returns: undefined
                            },
+"record_bug_scan_batch":
+{ Args: { "p_batch_index": number,"p_cost_usd": number,"p_error": string,"p_failed": boolean,"p_findings": Json,"p_input_tokens": number,"p_output_tokens": number,"p_scan_id": string }; Returns: Json
+                           },
 "record_integration_result":
 { Args: { "p_integration_id": string,"p_message": string,"p_status": string,"p_sync_status": string }; Returns: undefined
                            },
@@ -1143,6 +1251,9 @@ isOneToOne: false
 "respond_task_handoff":
 { Args: { "p_accept": boolean,"p_handoff_id": string,"p_note": string,"p_take"?: boolean }; Returns: undefined
                            },
+"resume_bug_scan":
+{ Args: { "p_scan_id": string }; Returns: undefined
+                           },
 "revoke_organization_invitation":
 { Args: { "p_invitation_id": string }; Returns: undefined
                            },
@@ -1177,6 +1288,9 @@ isOneToOne: false
 { Args: { "p_input": Json,"p_job_type": string,"p_snapshot_id": string }; Returns: {
               "correlation_id": string,"run_id": string
             }[]
+                           },
+"start_bug_scan":
+{ Args: { "p_files_planned": number,"p_files_total": number,"p_plan": Json,"p_snapshot_id": string }; Returns: string
                            },
 "store_file_edges":
 { Args: { "p_edges": Json,"p_snapshot_id": string }; Returns: number

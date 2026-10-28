@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { BUG_CATEGORIES } from "@/lib/bugs/model";
+import { unitRange } from "@/lib/bugs/scan";
 import { estimateTokens } from "./budget";
 import { MAX_EXCERPT_LINES, collapseRepeatedLines, lineCount, numberedExcerpt, stackFrames } from "./context";
 import { redactSecrets } from "./redact";
@@ -460,11 +462,88 @@ Shape: {"kind": "tests"|"docs", "language": string, "filename": string, "content
   citations: (output) => output.citations,
 };
 
+const scanUnit = z.object({ path: repoPath, part: z.number().int().min(1).max(8).optional(), parts: z.number().int().min(2).max(8).optional() }).strict();
+const bugScanInput = z.object({ units: z.array(scanUnit).min(1).max(6) }).strict();
+const bugScanOutput = z
+  .object({
+    summary: z.string().max(1500),
+    findings: z
+      .array(
+        z
+          .object({
+            title: z.string().min(1).max(200),
+            category: z.enum(BUG_CATEGORIES),
+            severity: z.enum(["critical", "high", "medium", "low", "info"]),
+            severityReason: z.string().min(1).max(600),
+            path: z.string().min(1).max(1024),
+            startLine: z.number().int().min(1),
+            endLine: z.number().int().min(1),
+            description: z.string().min(1).max(1800),
+            evidence: z.string().min(4).max(900),
+            confidence: z.number().min(0).max(1),
+            suggestedFix: z.string().max(1800),
+            validationSteps: z.string().max(900),
+          })
+          .strict(),
+      )
+      .max(15),
+    confidence,
+    missingContext,
+  })
+  .strict();
+export type BugScanInput = z.infer<typeof bugScanInput>;
+export type BugScanOutput = z.infer<typeof bugScanOutput>;
+
+// Whole-project bug analysis runs this job once per batch of files (src/lib/bugs/scan.ts plans the batches). The files
+// of the batch are in the prompt in full, so no tools are needed; the model reports only defects it can quote.
+const bugScan: JobSpec<BugScanInput, BugScanOutput> = {
+  type: "bug_scan",
+  title: "Bug scan",
+  inputSchema: bugScanInput,
+  outputSchema: bugScanOutput,
+  tools: [],
+  jobBudgetTokens: 30_000,
+  reservedOutput: 8192,
+  systemPrompt: `${SHARED_RULES}
+Task: find real defects in the files of this batch. A defect is behaviour that is wrong or unsafe given the code you can see: logic errors, unhandled null/undefined or error cases, race conditions, resource leaks, injection, missing authorization, secrets in code, broken API or database usage, incorrect async handling, inefficient hot paths, wrong or missing tests. Do NOT report style, naming, formatting, missing comments, or speculation about code you were not shown.
+For every finding:
+- "evidence" is an exact quote of the offending line(s) copied from the excerpt WITHOUT the "N| " prefix. A finding whose evidence is not found at the cited lines is discarded.
+- "startLine"/"endLine" are the 1-based lines of that evidence.
+- "category" is one of: ${BUG_CATEGORIES.join(", ")}. frontend = UI/React code; backend = server logic; api = HTTP/route contracts; database = SQL/queries/schema; auth_security = authentication, authorization, secrets, injection; repo_processing = parsing/importing source code; llm_orchestration = model calls, prompts, agents; token_usage = wasteful context or token cost; testing = tests; configuration = config/env/build; performance = speed or memory.
+- "severity" is critical (exploitable or data loss), high (crash or wrong results in normal use), medium (wrong in edge cases), low (minor), info. "severityReason" says in one sentence why.
+- "confidence" is 0-1: how sure you are this is a real defect from the code shown (use below 0.5 when it depends on code you did not see).
+- "suggestedFix" and "validationSteps" are plain text for a human; never claim anything was fixed or tested.
+Report at most 15 findings, most severe first. If the files have no defects, return an empty findings list. Use "missingContext" for code you would need to see to be sure.
+Shape: {"summary": string, "findings": [{"title": string, "category": string, "severity": "critical"|"high"|"medium"|"low"|"info", "severityReason": string, "path": string, "startLine": number, "endLine": number, "description": string, "evidence": string, "confidence": number, "suggestedFix": string, "validationSteps": string}], "confidence": "high"|"medium"|"low", "missingContext": [string]}`,
+  promptChars: () => 0,
+  async buildContext(input, reader, budget) {
+    const b = new ContextBuilder(reader, budget);
+    const known = new Set((await reader.listFiles()).map((f) => f.path));
+    const notes: string[] = [];
+    for (const unit of input.units) {
+      const text = await b.content(unit.path);
+      if (text === null) continue;
+      const total = lineCount(text);
+      const range = unitRange(unit, total);
+      const excerpt = numberedExcerpt(text, range.start, range.end, 1500);
+      b.add(`<file path="${escapeAttr(unit.path)}" lines="${excerpt.startLine}-${excerpt.endLine}" total_lines="${total}">\n${escapeData(redactSecrets(excerpt.text).text)}\n</file>`);
+      const imports = localImports(unit.path, text, known);
+      if (imports.length > 0 && !notes.some((n) => n.startsWith(`${unit.path} imports`))) notes.push(`${unit.path} imports: ${imports.join(", ")}`);
+    }
+    if (b.lineCounts.size === 0) throw new Error("None of these files is in this snapshot, or their text is not stored.");
+    if (notes.length > 0) b.add(`<file_list count="${notes.length}">\n${escapeData(notes.join("\n"))}\n</file_list>`);
+    return b.result();
+  },
+  userPrompt: (input, context) => `${context.text}\n\nFind the defects in the code shown from ${[...new Set(input.units.map((u) => u.path))].join(", ")}.`,
+  citations: (output) => output.findings.map(({ path, startLine, endLine }) => ({ path, startLine, endLine })),
+};
+
 export const JOBS = {
   code_qa: codeQa,
   requirement_trace: requirementTrace,
   code_review: codeReview,
   generate,
+  bug_scan: bugScan,
 } as const;
 
 export type AnyJob = (typeof JOBS)[JobType];

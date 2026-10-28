@@ -218,7 +218,7 @@ export async function runJob(
       const response = await callModel({
         system: job.systemPrompt,
         turns: turnsList,
-        tools: toolsEnabled && !forceSchema ? toolDeclarations(job.tools) : undefined,
+        tools: toolsEnabled && !forceSchema && job.tools.length > 0 ? toolDeclarations(job.tools) : undefined,
         responseJsonSchema: forceSchema ? outputJsonSchema : undefined,
         maxOutputTokens: job.reservedOutput,
       });
@@ -377,7 +377,7 @@ async function filterLocations(
   lineCounts: Map<string, number>,
   reader: RepoReader,
 ): Promise<{ output: Record<string, unknown>; dropped: number }> {
-  const listKey = jobType === "requirement_trace" ? "links" : jobType === "code_review" ? "findings" : "citations";
+  const listKey = jobType === "requirement_trace" ? "links" : jobType === "code_review" || jobType === "bug_scan" ? "findings" : "citations";
   const items = (output[listKey] as (Citation & Record<string, unknown>)[]) ?? [];
   const unknownPaths = [...new Set(items.map((i) => i.path))].filter((p) => !lineCounts.has(p) && isSafeRepoPath(p)).slice(0, ORCHESTRATOR_LIMITS.maxCitationFileReads);
   for (const path of unknownPaths) {

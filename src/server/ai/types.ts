@@ -1,6 +1,6 @@
 // Shared vocabulary of the AI layer. Pure types and constants: no I/O, safe to import from tests.
 
-export const JOB_TYPES = ["code_qa", "requirement_trace", "code_review", "generate"] as const;
+export const JOB_TYPES = ["code_qa", "requirement_trace", "code_review", "generate", "bug_scan"] as const;
 export type JobType = (typeof JOB_TYPES)[number];
 
 export const RUN_STATES = [

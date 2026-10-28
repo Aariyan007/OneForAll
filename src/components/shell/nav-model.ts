@@ -53,6 +53,7 @@ export function paths(ctx: RouteContext) {
     project,
     requirements: project ? `${project}/requirements` : undefined,
     assistant: project ? `${project}/assistant` : undefined,
+    bugs: project ? `${project}/bugs` : undefined,
   };
 }
 
@@ -89,6 +90,7 @@ export function buildNav(ctx: RouteContext, role?: string): NavSection[] {
         { key: "requirements", label: "Requirements", href: p.requirements, icon: "listChecks", hint: "Open a project", match: "prefix" },
         { key: "repository", label: "Repository", href: p.project ? `${p.project}#repository` : undefined, icon: "branch", hint: "Open a project" },
         { key: "intelligence", label: "Engineering Intelligence", href: p.project ? `${p.project}#intelligence` : undefined, icon: "network", hint: "Open a project" },
+        { key: "bugs", label: "Bugs", href: p.bugs, icon: "alert", hint: "Open a project", match: "prefix" },
         { key: "assistant", label: "AI Assistant", href: p.assistant, icon: "sparkle", hint: "Open a project", match: "prefix" },
       ],
     },
