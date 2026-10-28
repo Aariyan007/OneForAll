@@ -61,14 +61,14 @@ export function readSourceArchive(buf: Buffer, limits: ArchiveLimits, now?: () =
   const zip = readZip(buf, limits, now);
 
   // 1. Normalize every path with the manifest rules (no absolute, drive-letter, "..", control characters, ...).
-  const candidates: { path: string; size: number; data: Buffer | null }[] = [];
+  const candidates: { path: string; size: number; data: Buffer | null; link?: true }[] = [];
   for (const file of zip.files) {
     // The database path CHECK rejects every [:cntrl:] character, including C1 controls (U+0080-U+009F) that the
     // manifest normalizer lets through. Reject them here, before anything is written.
     if (/[\u0080-\u009f]/.test(file.name)) throw new ArchiveError("Unsafe path in the archive (Path contains control characters.)");
     const normalized = normalizeRepositoryPath(file.name);
     if (!normalized.ok) throw new ArchiveError(`Unsafe path in the archive (${normalized.error})`);
-    candidates.push({ path: normalized.path, size: file.size, data: file.data });
+    candidates.push({ path: normalized.path, size: file.size, data: file.data, link: file.link });
   }
 
   // 2. One shared top-level folder (as in Git-host downloads, e.g. "repo-<sha>/") is the repository root: strip it.
@@ -98,13 +98,16 @@ export function readSourceArchive(buf: Buffer, limits: ArchiveLimits, now?: () =
   const skipped: SourceArchive["skipped"] = [];
   const kept: { path: string; content: Buffer }[] = [];
   for (const c of candidates) {
-    // One category per file, in this order: metadata, generated folder, sensitive, oversized.
+    // One category per file, in this order: metadata, generated folder, sensitive, symbolic link (counted as
+    // metadata), oversized.
     if (c.path === ARCHIVE_METADATA || c.path.startsWith(`${ARCHIVE_METADATA}/`)) {
       skipped.push({ path: c.path, reason: "archive metadata", category: "metadata" });
     } else if (isIgnoredPath(c.path)) {
       skipped.push({ path: c.path, reason: "ignored directory", category: "generated" });
     } else if (isSensitivePath(c.path)) {
       skipped.push({ path: c.path, reason: "may contain credentials", category: "sensitive" });
+    } else if (c.link) {
+      skipped.push({ path: c.path, reason: "symbolic link (not followed)", category: "metadata" });
     } else if (c.data === null) {
       skipped.push({ path: c.path, reason: `larger than the ${formatBytes(limits.maxFileBytes)} per-file limit`, category: "oversized" });
     } else {

@@ -6,7 +6,8 @@ import type { ArchiveLimits } from "./limits";
 // instead of guessing:
 //   * ZIP64, multi-disk, encrypted entries, compression other than STORE (0) / DEFLATE (8);
 //   * data before or after the archive, malformed records, overlapping entries;
-//   * symbolic links and special files (Unix mode bits), non-UTF-8 names without the UTF-8 flag;
+//   * special files (devices, pipes, sockets) and non-UTF-8 names without the UTF-8 flag; symbolic links are skipped
+//     and counted, never followed;
 //   * sizes beyond the limits, suspicious compression ratios, wrong CRC-32 or length after decompression.
 // Decompression is bounded by the declared size (`maxOutputLength`), so a lying header cannot expand without limit.
 
@@ -21,7 +22,8 @@ export class ArchiveError extends Error {
 export type ZipFile = {
   name: string; // raw entry name, decoded (not yet normalized)
   size: number; // uncompressed size from the central directory (verified when the data is read)
-  data: Buffer | null; // null when the file was skipped for size
+  data: Buffer | null; // null when the file was skipped for size, or is a symbolic link
+  link?: true; // a symbolic link: its header is validated, but it is never decompressed, followed or recorded
 };
 
 export type ZipArchive = { files: ZipFile[]; directories: number; comment: string };
@@ -35,6 +37,7 @@ const UNIX = 3;
 const S_IFMT = 0o170000;
 const S_IFREG = 0o100000;
 const S_IFDIR = 0o040000;
+const S_IFLNK = 0o120000;
 
 const utf8 = new TextDecoder("utf-8", { fatal: true });
 
@@ -117,10 +120,14 @@ export function readZip(buf: Buffer, limits: ArchiveLimits, now: () => number = 
     const name = decodeName(nameBytes, (flags & 0x0800) !== 0);
     if (name.includes("\u0000")) throw new ArchiveError("The archive contains a file name with a null byte.");
 
+    // Symbolic links are common in real repositories (CLAUDE.md -> AGENTS.md); they are skipped and counted, never
+    // followed. Devices, pipes and sockets are still refused.
+    let isLink = false;
     if (madeBy >> 8 === UNIX) {
       const type = (externalAttributes >>> 16) & S_IFMT;
-      if (type !== 0 && type !== S_IFREG && type !== S_IFDIR) {
-        throw new ArchiveError("The archive contains a symbolic link or special file, which is not supported.");
+      isLink = type === S_IFLNK;
+      if (type !== 0 && type !== S_IFREG && type !== S_IFDIR && !isLink) {
+        throw new ArchiveError("The archive contains a special file (device, pipe or socket), which is not supported.");
       }
     }
 
@@ -148,6 +155,11 @@ export function readZip(buf: Buffer, limits: ArchiveLimits, now: () => number = 
       continue;
     }
     if (method === 0 && compressedSize !== size) throw malformed();
+
+    if (isLink) {
+      files.push({ name, size, data: null, link: true }); // the link target text is never read
+      continue;
+    }
 
     if (size > limits.maxFileBytes) {
       files.push({ name, size, data: null }); // reported as skipped; never decompressed

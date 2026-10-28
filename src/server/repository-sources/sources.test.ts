@@ -106,11 +106,40 @@ describe("readZip: structure", () => {
     rejects(zip([{ name: "a.ts", data: SRC, size: SRC.length + 5 }]), /corrupt/);
   });
 
-  it("rejects encryption, unsupported compression, symlinks and special files", () => {
+  it("rejects encryption, unsupported compression and special files", () => {
     rejects(zip([{ name: "a.ts", data: SRC, flags: 0x0801 }]), /Encrypted/);
     rejects(zip([{ name: "a.ts", data: SRC, method: 12 }]), /compression method/);
-    rejects(zip([{ name: "link", data: "/etc/passwd", method: 0, mode: 0o120777 }]), /symbolic link/);
     rejects(zip([{ name: "dev", data: "", method: 0, mode: 0o020644 }]), /special file/);
+    rejects(zip([{ name: "pipe", data: "", method: 0, mode: 0o010644 }]), /special file/);
+  });
+
+  // Regression: real repositories contain symlinks (for example CLAUDE.md -> AGENTS.md). The whole archive used to be
+  // rejected, so no snapshot and no graph could be made for them. A link is now skipped and counted, never followed.
+  it("skips symbolic links instead of rejecting the archive, and never reads or records their target", () => {
+    const a = readSourceArchive(
+      zip([
+        { name: "repo/src/a.ts", data: SRC },
+        { name: "repo/CLAUDE.md", data: "AGENTS.md", method: 0, mode: 0o120777 },
+        { name: "repo/escape", data: "/etc/passwd", method: 0, mode: 0o120777 },
+      ]),
+      L,
+    );
+    assert.deepEqual(a.manifest.map((m) => m.path), ["src/a.ts"]);
+    assert.ok(!a.contents.has("CLAUDE.md") && !a.contents.has("escape"));
+    assert.deepEqual(
+      a.skipped.map((s) => [s.path, s.category]),
+      [["CLAUDE.md", "metadata"], ["escape", "metadata"]],
+    );
+    assert.match(a.skipped[0].reason, /symbolic link/);
+    assert.equal(countExclusions(a.skipped).metadata, 2);
+  });
+
+  it("an archive containing only symbolic links still has nothing to record", () => {
+    rejects(zip([{ name: "link", data: "target", method: 0, mode: 0o120777 }]), /no files that can be recorded/);
+  });
+
+  it("a symbolic link still takes part in the path collision checks", () => {
+    rejects(zip([{ name: "a.ts", data: SRC }, { name: "A.ts", data: "x", method: 0, mode: 0o120777 }]), /duplicate or colliding/);
   });
 
   it("rejects overlapping entries", () => {
