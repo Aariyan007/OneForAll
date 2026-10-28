@@ -387,6 +387,38 @@ isOneToOne: false
       referencedColumns: ["id"]
     }
                   ]
+                },"repository_file_edges": {
+                  Row: {
+                    "created_at": string,"id": number,"kind": string,"snapshot_id": string,"source_file_id": string,"specifier": string,"target_file_id": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "created_at"?: string,"id"?: never,"kind": string,"snapshot_id": string,"source_file_id": string,"specifier": string,"target_file_id": string
+                  }
+                  Update: {
+                    "created_at"?: string,"id"?: never,"kind"?: string,"snapshot_id"?: string,"source_file_id"?: string,"specifier"?: string,"target_file_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "repository_file_edges_snapshot_id_fkey"
+      columns: ["snapshot_id"]
+isOneToOne: false
+      referencedRelation: "repository_snapshots"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "repository_file_edges_source_file_id_fkey"
+      columns: ["source_file_id"]
+isOneToOne: false
+      referencedRelation: "repository_files"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "repository_file_edges_target_file_id_fkey"
+      columns: ["target_file_id"]
+isOneToOne: false
+      referencedRelation: "repository_files"
+      referencedColumns: ["id"]
+    }
+                  ]
                 },"repository_files": {
                   Row: {
                     "content_hash": string,"created_at": string,"id": string,"language": string | null,"path": string,"size_bytes": number,"snapshot_id": string
@@ -1145,6 +1177,9 @@ isOneToOne: false
 { Args: { "p_input": Json,"p_job_type": string,"p_snapshot_id": string }; Returns: {
               "correlation_id": string,"run_id": string
             }[]
+                           },
+"store_file_edges":
+{ Args: { "p_edges": Json,"p_snapshot_id": string }; Returns: number
                            },
 "store_snapshot_contents":
 { Args: { "p_files": Json,"p_snapshot_id": string }; Returns: {

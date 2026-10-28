@@ -107,7 +107,8 @@ const connectFieldsSchema = z.object({
   repositoryUrl: z.string(),
   owner: z.string().trim().max(100, "Use at most 100 characters."),
   name: z.string().trim().max(100, "Use at most 100 characters."),
-  defaultBranch: branchSchema,
+  // Optional: when empty, the branch is detected from the provider when the repository is connected.
+  defaultBranch: z.union([z.literal(""), branchSchema]),
   visibility: visibilitySchema,
 });
 
@@ -132,7 +133,7 @@ export function parseConnectForm(
     repositoryUrl: formData.get("repositoryUrl") ?? "",
     owner: formData.get("owner") ?? "",
     name: formData.get("name") ?? "",
-    defaultBranch: formData.get("defaultBranch") ?? "",
+    defaultBranch: String(formData.get("defaultBranch") ?? "").trim(),
     visibility: formData.get("visibility"),
   });
   const fieldErrors: NonNullable<RepositoryFormState["fieldErrors"]> = base.success

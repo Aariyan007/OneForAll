@@ -5,6 +5,7 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { requireUser } from "@/server/auth/session";
 import { idSchema } from "@/server/departments/schema";
+import { GitHubClient, gitHubRepoFromUrl } from "@/server/integrations/github";
 import { GENERIC_MESSAGE, PERMISSION_MESSAGE } from "@/server/requirements/errors";
 import {
   type RepositoryActionResult,
@@ -46,6 +47,23 @@ function toErrorMessage(error: { code?: string; message: string }): string {
   }
 }
 
+// Default branch (and visibility) of a public GitHub repository, read from GitHub itself.
+async function detectGitHubDefaultBranch(
+  provider: string,
+  repositoryUrl: string,
+): Promise<{ ok: true; branch: string; private: boolean } | { ok: false; error: string }> {
+  const manual = "Could not detect the default branch automatically. Enter it manually.";
+  if (provider !== "GITHUB") return { ok: false, error: "Enter the default branch (automatic detection works for GitHub repositories)." };
+  const repo = gitHubRepoFromUrl(repositoryUrl);
+  if (!repo) return { ok: false, error: manual };
+  try {
+    const info = await new GitHubClient(null).getRepository(repo);
+    return info.defaultBranch ? { ok: true, branch: info.defaultBranch, private: info.private } : { ok: false, error: manual };
+  } catch {
+    return { ok: false, error: `${manual} (A private repository needs its branch entered, or a GitHub token under Integrations.)` };
+  }
+}
+
 export async function createRepository(
   organizationId: string,
   departmentId: string,
@@ -61,7 +79,16 @@ export async function createRepository(
   const parsed = parseConnectForm(formData);
   if (!parsed.success) return { fieldErrors: parsed.fieldErrors };
 
-  const { provider, repositoryUrl, owner, name, defaultBranch, visibility } = parsed.data;
+  const { provider, repositoryUrl, owner, name, visibility } = parsed.data;
+  let defaultBranch = parsed.data.defaultBranch;
+  let detectedVisibility = visibility;
+  if (defaultBranch === "") {
+    // No branch typed: ask the provider (public GitHub repositories need no token). Never assume "main".
+    const detected = await detectGitHubDefaultBranch(provider, repositoryUrl);
+    if (!detected.ok) return { fieldErrors: { defaultBranch: [detected.error] } };
+    defaultBranch = detected.branch;
+    if (visibility === "UNKNOWN") detectedVisibility = detected.private ? "PRIVATE" : "PUBLIC";
+  }
   const supabase = await createClient();
   const { error } = await supabase.rpc("create_repository", {
     p_project_id: ids.data.projectId,
@@ -70,7 +97,7 @@ export async function createRepository(
     p_owner: owner,
     p_name: name,
     p_default_branch: defaultBranch,
-    p_visibility: visibility,
+    p_visibility: detectedVisibility,
   });
   if (error) return { error: toErrorMessage(error) };
 
