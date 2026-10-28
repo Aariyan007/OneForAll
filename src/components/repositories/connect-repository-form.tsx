@@ -52,10 +52,10 @@ export function ConnectRepositoryForm({ action, cancelHref }: { action: ConnectR
       <FormField
         label="Default branch"
         name="defaultBranch"
-        placeholder="main"
-        hint="The branch your team ships from."
+        placeholder="Detected automatically"
+        hint="Leave empty to use the repository's default branch from GitHub."
         mono
-        required
+        optional
         errors={errors?.defaultBranch}
       />
       {state.error && <Alert tone="danger">{state.error}</Alert>}

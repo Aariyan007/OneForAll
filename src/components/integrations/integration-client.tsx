@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useActionState, useEffect, useState } from "react";
 import { Alert } from "@/components/ui/alert";
 import { Spinner, buttonClass } from "@/components/ui/button";
-import { IconArrowRight, IconBranch, IconCommit, IconExternal, IconNetwork } from "@/components/ui/icons";
+import { IconArrowRight, IconBranch, IconNetwork } from "@/components/ui/icons";
 import { reloadWithNotice, useReloadOnSuccess } from "@/components/ui/reload";
 import type { IntegrationFormState } from "@/server/integrations/actions";
 
@@ -117,7 +117,6 @@ export function TextField({ name, label, hint, placeholder, type = "text" }: { n
 // GitHub
 
 type Branch = { name: string; sha: string };
-type Commit = { sha: string; branch: string; message: string; authoredAt: string | null; htmlUrl: string };
 type ImportResponse = { ok: boolean; error?: string; code?: string; message?: string; analysisError?: string; snapshotId?: string };
 
 // `resultHref` (with "{snapshotId}"): where a successful import continues, as a full page load. The outcome is then
@@ -138,9 +137,7 @@ export function GitHubImportPanel({
   const [branches, setBranches] = useState<{ list: Branch[]; truncated: boolean } | null>(null);
   const [branchError, setBranchError] = useState<string | null>(null);
   const [branch, setBranch] = useState(defaultBranch);
-  const [commitInput, setCommitInput] = useState("");
-  const [commit, setCommit] = useState<Commit | null>(null);
-  const [phase, setPhase] = useState<"idle" | "resolving" | "importing" | "opening">("idle");
+  const [phase, setPhase] = useState<"idle" | "importing" | "opening">("idle");
   const [repositoryInfo, setRepositoryInfo] = useState<{ private: boolean } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ImportResponse | null>(null);
@@ -178,30 +175,14 @@ export function GitHubImportPanel({
 
   const busy = phase !== "idle";
 
-  const resolve = async () => {
-    setPhase("resolving");
-    setError(null);
-    setCommit(null);
-    setResult(null);
-    try {
-      const body = await postJson<{ ok: boolean; commit?: Commit; error?: string }>(apiUrl, { op: "resolve", branch, commit: commitInput });
-      if (body.ok && body.commit) setCommit(body.commit);
-      else setError(body.error ?? "The commit could not be resolved.");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "The commit could not be resolved.");
-    } finally {
-      setPhase("idle");
-    }
-  };
-
+  // No commit SHA is asked for: the server resolves the branch tip itself and records the exact commit on the snapshot.
   const runImport = async () => {
-    if (!commit) return;
     setPhase("importing");
     setError(null);
     setResult(null);
     let opening = false;
     try {
-      const body = await postJson<ImportResponse>(apiUrl, { op: "import", branch: commit.branch, sha: commit.sha });
+      const body = await postJson<ImportResponse>(apiUrl, { op: "import", branch });
       setResult(body);
       if (body.ok && body.snapshotId && resultHref) {
         opening = true;
@@ -219,13 +200,13 @@ export function GitHubImportPanel({
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid gap-3 sm:grid-cols-1">
         <div className="flex flex-col gap-1.5">
           <label htmlFor="gh-branch" className="text-[13px] font-medium text-fg">
             Branch
           </label>
           {branches && branches.list.length > 0 ? (
-            <select id="gh-branch" value={branch} disabled={busy} onChange={(e) => { setBranch(e.target.value); setCommit(null); }} className={INPUT}>
+            <select id="gh-branch" value={branch} disabled={busy} onChange={(e) => setBranch(e.target.value)} className={INPUT}>
               {!branches.list.some((b) => b.name === branch) && <option value={branch}>{branch}</option>}
               {branches.list.map((b) => (
                 <option key={b.name} value={b.name}>
@@ -234,7 +215,7 @@ export function GitHubImportPanel({
               ))}
             </select>
           ) : (
-            <input id="gh-branch" value={branch} disabled={busy} onChange={(e) => { setBranch(e.target.value); setCommit(null); }} className={`${INPUT} font-mono`} />
+            <input id="gh-branch" value={branch} disabled={busy} onChange={(e) => setBranch(e.target.value)} className={`${INPUT} font-mono`} />
           )}
           <p className="text-[12px] text-fg-3" aria-live="polite">
             {branchError ? (
@@ -251,46 +232,15 @@ export function GitHubImportPanel({
             )}
           </p>
         </div>
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor="gh-commit" className="text-[13px] font-medium text-fg">
-            Commit SHA <span className="font-normal text-fg-3">(optional)</span>
-          </label>
-          <input
-            id="gh-commit"
-            value={commitInput}
-            disabled={busy}
-            onChange={(e) => { setCommitInput(e.target.value); setCommit(null); }}
-            placeholder="Leave empty for the latest commit of the branch"
-            className={`${INPUT} font-mono`}
-            maxLength={40}
-          />
-          <p className="text-[12px] text-fg-3">A full 40-character SHA on the selected branch.</p>
-        </div>
       </div>
 
       <div className="flex flex-wrap gap-2">
-        <button type="button" onClick={resolve} disabled={busy || branch.trim() === ""} className={buttonClass("secondary", "sm")}>
-          {phase === "resolving" ? <Spinner /> : <IconCommit size={14} />}
-          {phase === "resolving" ? "Resolving…" : "Resolve commit"}
-        </button>
-        <button type="button" onClick={runImport} disabled={busy || !commit} className={buttonClass("primary", "sm")}>
+        <button type="button" onClick={runImport} disabled={busy || branch.trim() === ""} className={buttonClass("primary", "sm")}>
           {phase === "importing" ? <Spinner /> : <IconBranch size={14} />}
-          {phase === "importing" ? "Importing…" : result && !result.ok && result.code !== "duplicate" ? "Retry import" : "Import this commit"}
+          {phase === "importing" ? "Importing…" : result && !result.ok && result.code !== "duplicate" ? "Retry import" : "Import latest from this branch"}
         </button>
       </div>
 
-      {commit && (
-        <div className="rounded-lg border border-border bg-surface-2/50 px-3 py-2.5 text-[12.5px]">
-          <p className="text-fg-2">
-            <span className="font-mono text-fg">{commit.sha.slice(0, 12)}</span> on <span className="font-mono">{commit.branch}</span>
-            {commit.authoredAt && <span className="text-fg-3"> · {new Date(commit.authoredAt).toLocaleString()}</span>}
-          </p>
-          <p className="mt-0.5 truncate text-fg-3">{commit.message || "(no message)"}</p>
-          <a href={commit.htmlUrl} target="_blank" rel="noopener noreferrer" className="mt-1 inline-flex items-center gap-1 text-accent hover:underline">
-            View on GitHub <IconExternal size={11} />
-          </a>
-        </div>
-      )}
       {phase === "opening" && (
         <p className="t-small flex items-center gap-2 text-fg-3" role="status">
           <Spinner /> Imported. Opening the result…
@@ -298,12 +248,12 @@ export function GitHubImportPanel({
       )}
       {phase === "importing" && (
         <p className="t-small flex items-center gap-2 text-fg-3" role="status">
-          <Spinner /> Downloading exactly this commit from GitHub, validating it and running the structure analysis. Keep this page open; it can take up to two minutes.
+          <Spinner /> Finding the latest commit of the branch, downloading it from GitHub, validating it and building the code graph. Keep this page open; it can take up to two minutes.
         </p>
       )}
       {error && <Alert tone="danger">{error}</Alert>}
       {result && !result.ok && (
-        <Alert tone={result.code === "duplicate" ? "info" : "danger"} title={result.code === "duplicate" ? "Already imported" : "Import failed"}>
+        <Alert tone={result.code === "duplicate" ? "info" : "danger"} title={result.code === "duplicate" ? "Already up to date" : "Import failed"}>
           {result.error}
           {result.snapshotId && (
             <>
@@ -322,9 +272,12 @@ export function GitHubImportPanel({
             <Link href={`${snapshotsHref}/${result.snapshotId}`} className="inline-flex items-center gap-1 underline underline-offset-2">
               Open the snapshot <IconArrowRight size={12} />
             </Link>
+            <Link href={`${snapshotsHref}/${result.snapshotId}/project-graph`} className="inline-flex items-center gap-1 underline underline-offset-2">
+              <IconNetwork size={12} /> View the project graph
+            </Link>
             {!result.analysisError && (
               <Link href={`${snapshotsHref}/${result.snapshotId}/graph`} className="inline-flex items-center gap-1 underline underline-offset-2">
-                <IconNetwork size={12} /> View the repository graph
+                <IconNetwork size={12} /> Symbol graph
               </Link>
             )}
           </span>

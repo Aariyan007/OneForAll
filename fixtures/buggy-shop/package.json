@@ -1,0 +1,7 @@
+{
+  "name": "buggy-shop",
+  "version": "1.0.0",
+  "description": "A tiny shop backend and cart UI with deliberate defects, used to demonstrate OneForAll bug analysis.",
+  "main": "src/server.ts",
+  "scripts": { "start": "node dist/server.js", "test": "node --test" }
+}

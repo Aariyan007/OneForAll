@@ -5,6 +5,7 @@ import { useEffect, useRef } from "react";
 import { Avatar } from "@/components/ui/data";
 import { IconBell, IconLogout, IconMenu, IconSearch } from "@/components/ui/icons";
 import type { ShellUser } from "./app-shell";
+import { ThemeToggle } from "./theme-toggle";
 
 export function TopBar({
   user,
@@ -44,6 +45,7 @@ export function TopBar({
       </button>
 
       <div className="ml-auto flex items-center gap-1.5">
+        <ThemeToggle />
         <NotificationsLink unread={unreadNotifications} />
         <AccountMenu user={user} signOutAction={signOutAction} />
       </div>

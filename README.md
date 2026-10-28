@@ -121,6 +121,7 @@ Never commit `.env.local`. No Supabase service-role key is used.
 - [Manual setup checklist](docs/manual-setup-checklist.md)
 - [Repository ingestion](docs/repository-ingestion.md)
 - [Repository graph](docs/repository-graph.md)
+- [Bug intelligence: project graph, AI bug scan, assignment, approved fixes](docs/BUG_INTELLIGENCE.md)
 - [Integrations](docs/integrations.md)
 - [Phase handover](docs/phase-handover.md)
 

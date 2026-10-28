@@ -266,7 +266,7 @@ export async function importGitHubCommit(projectId: string, repository: Reposito
     .order("created_at", { ascending: false });
   if (existingError) return { ok: false, error: GENERIC };
   const completed = existing.find((s) => s.status === "COMPLETED");
-  if (completed) return { ok: false, error: `Commit ${sha.slice(0, 12)} is already imported.`, code: "duplicate", snapshotId: completed.id };
+  if (completed) return { ok: false, error: `Already up to date: the latest commit of ${branch} (${sha.slice(0, 12)}) is already imported.`, code: "duplicate", snapshotId: completed.id };
   if (existing.some((s) => s.status === "PROCESSING")) return { ok: false, error: "This commit is already being imported." , code: "busy" };
   let snapshotId = existing.find((s) => s.status === "PENDING" || s.status === "FAILED")?.id;
   if (!snapshotId) {

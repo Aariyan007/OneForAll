@@ -114,13 +114,23 @@ export default async function SnapshotsPage({
                     <span className="t-small text-fg-3">{formatDateTime(snapshot.created_at)}</span>
                   </div>
                   {snapshot.error_message && <p className="mt-2 text-[12.5px] text-danger">{snapshot.error_message}</p>}
+                  {snapshot.status === "COMPLETED" && (
+                    <Link
+                      href={`${projectPath}/repository/snapshots/${snapshot.id}/project-graph`}
+                      className="mr-4 mt-2 inline-flex items-center gap-1 text-[12.5px] text-fg-2 transition-colors hover:text-accent"
+                    >
+                      <IconNetwork size={13} />
+                      Project graph
+                      <IconArrowRight size={12} />
+                    </Link>
+                  )}
                   {snapshot.status === "COMPLETED" && analysisStatus.get(snapshot.id) === "COMPLETED" && (
                     <Link
                       href={`${projectPath}/repository/snapshots/${snapshot.id}/graph`}
                       className="mt-2 inline-flex items-center gap-1 text-[12.5px] text-fg-2 transition-colors hover:text-accent"
                     >
                       <IconNetwork size={13} />
-                      View Repository Graph
+                      Symbol graph
                       <IconArrowRight size={12} />
                     </Link>
                   )}
