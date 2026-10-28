@@ -9,7 +9,7 @@ them) and shows it as an interactive graph, so every engineer works from the sam
 Final-year project (CSD 415 Project Work), Department of Computer Science and Engineering, Muthoot Institute of Technology
 and Science. Team 14: Sunu Aariyan, Jithin P R, Mathew Maijo Kavalam.
 
-> Status: Project Phase I. The AI layer and defect-risk prediction are planned and not implemented yet. This phase uses no AI, embeddings or RAG.
+> Status: Project Phase I. The AI Assistant (context-grounded code Q&A, requirement ↔ code trace, review and error explanation, test and doc drafts on Google Gemini) is implemented. Defect-risk prediction is planned and not implemented yet.
 
 ## Architecture
 
@@ -32,6 +32,8 @@ Solid boxes are implemented; dashed boxes are planned.
 | Structure analysis | Symbols and relationships extracted with tree-sitter for TypeScript, JavaScript, Python and Java |
 | Repository graph | Overview, file view, search, focused view and expand, read through bounded `SECURITY INVOKER` functions |
 | Integrations | GitHub (public, or private with a fine-grained token) and Jira Cloud (one-way issue sync). Tokens are encrypted with AES-256-GCM |
+| Source text store | Snapshot source stored in Postgres, accepted only when its SHA-256 matches the signed manifest; plain-text code search |
+| AI Assistant | Four jobs with deterministic retrieval, read-only tools, validated JSON answers with verified line citations, retries and model fallback, per-run token/cost/latency records, organisation on/off switch |
 
 Authorization lives in the database: every table is protected by PostgreSQL Row Level Security, and the application
 re-checks access but is never the only guard.
@@ -63,6 +65,10 @@ docs/               Setup checklist, ingestion, repository graph, integrations, 
 
 ## Getting started
 
+**Full guide: [docs/USER_GUIDE.md](docs/USER_GUIDE.md)** (how to run the project, then the complete flow: sign up →
+organisation → department → team → project → members → requirements and tasks → repository → snapshot → graph → AI
+Assistant).
+
 Prerequisites: Node.js 20+, Docker Desktop (for local Supabase).
 
 ```bash
@@ -87,6 +93,9 @@ If an existing route shows the not-found page in development, run `npm run dev:c
 | `NEXT_PUBLIC_SITE_URL` | no | yes | App origin for auth email links (local: `http://localhost:3000`) |
 | `STRUCTURE_PERSIST_KEY` | **yes** | for ingestion | 32+ random characters; the same value is stored in Vault as `structure_persist_key` |
 | `INTEGRATION_ENCRYPTION_KEY` | **yes** | for GitHub/Jira tokens | 32+ random characters; server only, not stored in Vault |
+| `GEMINI_API_KEY` | **yes** | for the AI Assistant | Google Gemini API key; server only |
+| `APP_URL` | no | no | Public origin for invitation links when the app is shared (for example a tunnel URL) |
+| `SMTP_USER`, `SMTP_PASSWORD` | **yes** (password) | for invitation emails | Gmail address and app password |
 
 Generate a value:
 
