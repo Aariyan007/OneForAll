@@ -1,3 +1,5 @@
+import Link from "next/link";
+import { MyBugsList } from "@/components/bugs/my-bugs-list";
 import { Alert } from "@/components/ui/alert";
 import { ButtonLink } from "@/components/ui/button";
 import { Card, CardLink } from "@/components/ui/card";
@@ -15,8 +17,10 @@ import {
 } from "@/components/ui/icons";
 import { PageBody, PageHeader, SectionHeader } from "@/components/ui/page";
 import { StatusBadge } from "@/components/ui/status";
+import { describeMyBugs } from "@/lib/bugs/my-bugs";
 import { listMyWorkspaces } from "@/lib/workspaces";
 import { requireUser } from "@/server/auth/session";
+import { getMyBugs } from "@/server/bugs/overview";
 import { listMyInvitations, listMySuspendedMemberships } from "@/server/members/queries";
 import { getProfile } from "@/server/profiles/queries";
 import { ROLE_LABELS, isOrgRole } from "@/lib/authz/permissions";
@@ -33,12 +37,14 @@ const HIERARCHY = [
 
 export default async function DashboardPage() {
   const user = await requireUser();
-  const [profile, organizations, invitations, suspended] = await Promise.all([
+  const [profile, organizations, invitations, suspended, myBugsResult] = await Promise.all([
     getProfile(user.id),
     listMyWorkspaces(user.id),
     listMyInvitations(),
     listMySuspendedMemberships(),
+    getMyBugs(user.id),
   ]);
+  const myBugs = describeMyBugs(myBugsResult);
   const name = profile?.display_name ?? profile?.email ?? "there";
   const managed = organizations.filter((org) => org.role === "OWNER" || org.role === "ADMIN").length;
 
@@ -67,6 +73,27 @@ export default async function DashboardPage() {
           Your membership is suspended in {suspended.map((s) => s.organization_name).join(", ")}. An owner or admin of that organization can
           reactivate it; until then its pages and data are not available to you.
         </Alert>
+      )}
+
+      {myBugs.kind === "error" && (
+        <Alert tone="danger" title="Could not load your bugs" className="mt-6">
+          {myBugs.message}
+        </Alert>
+      )}
+
+      {myBugs.kind === "list" && myBugs.assigned.length > 0 && (
+        <section className="mt-8" aria-labelledby="my-bugs-heading">
+          <SectionHeader
+            title={<span id="my-bugs-heading">Bugs assigned to you</span>}
+            description={myBugs.assigned.length > 5 ? `Your ${myBugs.assigned.length} most recent are shown.` : "Open one to see the details and start work."}
+          />
+          <MyBugsList items={myBugs.assigned.slice(0, 5)} />
+          <p className="mt-2 text-[12.5px]">
+            <Link href="/my-bugs" className="text-accent underline-offset-2 hover:underline">
+              All my bugs
+            </Link>
+          </p>
+        </section>
       )}
 
       {invitations.length > 0 && (

@@ -1,5 +1,6 @@
 import "server-only";
-import { OPEN_BUG_STATUSES, SEVERITY_RANK, type BugSeverity } from "@/lib/bugs/model";
+import { OPEN_BUG_STATUSES, REVIEW_BUG_STATUSES, SEVERITY_RANK, type BugSeverity } from "@/lib/bugs/model";
+import { bugRef, MY_BUGS_LOAD_ERROR, type MyBugItem, type MyBugsResult, splitMyBugs } from "@/lib/bugs/my-bugs";
 import { createClient } from "@/lib/supabase/server";
 
 // Organization-wide and personal bug views, read as the signed-in user: RLS limits every row to the projects they can see.
@@ -39,7 +40,9 @@ export async function getOrgBugOverview(organizationId: string, isAdmin: boolean
   const supabase = await createClient();
   const { data: projectRows } = await supabase
     .from("projects")
-    .select("id, name, team_id, teams!inner(id, name, department_id, departments!inner(id, name, organization_id))")
+    // `projects_team_id_fkey` names the owning team: since project_teams (collaborating teams) there are two relationships
+    // between projects and teams and an unnamed embed fails with "more than one relationship was found".
+    .select("id, name, team_id, teams!projects_team_id_fkey!inner(id, name, department_id, departments!inner(id, name, organization_id))")
     .eq("teams.departments.organization_id", organizationId)
     .order("name")
     .limit(200);
@@ -139,39 +142,66 @@ export async function getOrgBugOverview(organizationId: string, isAdmin: boolean
   };
 }
 
-// The signed-in person's own queue: bugs assigned to them, and bugs waiting for their review or verification.
-export async function getMyBugs(userId: string) {
+const MY_BUG_COLUMNS = "id, title, description, severity, status, category, file_path, project_id, organization_id, assigned_to, assigned_at, created_at";
+const MY_BUGS_LIMIT = 300;
+
+// The signed-in person's own queue: open bugs assigned to them, and bugs other people fixed that wait for their review or
+// verification. Read as the signed-in user (RLS decides what they see). Two queries, so a long review queue can never push an
+// assigned bug out of the first N rows. Any failure is returned as `ok: false`: callers must not show it as "nothing assigned".
+export async function getMyBugs(userId: string): Promise<MyBugsResult> {
   const supabase = await createClient();
-  const { data: rows } = await supabase
-    .from("repository_bugs")
-    .select("id, title, severity, status, category, file_path, project_id, organization_id, assigned_to, created_at")
-    .or(`assigned_to.eq.${userId},status.in.(CODE_REVIEW,QA_VERIFICATION)`)
-    .not("status", "in", "(RESOLVED,REJECTED,CANCELLED)")
-    .order("created_at", { ascending: false })
-    .limit(300);
-  const bugs = rows ?? [];
+  const [mine, review] = await Promise.all([
+    supabase.from("repository_bugs").select(MY_BUG_COLUMNS).eq("assigned_to", userId).in("status", [...OPEN_BUG_STATUSES]).order("assigned_at", { ascending: false, nullsFirst: false }).limit(MY_BUGS_LIMIT),
+    supabase.from("repository_bugs").select(MY_BUG_COLUMNS).in("status", [...REVIEW_BUG_STATUSES]).order("created_at", { ascending: false }).limit(MY_BUGS_LIMIT),
+  ]);
+  if (mine.error || review.error) {
+    console.error("[bugs] my bugs query failed", { mine: mine.error?.message, review: review.error?.message });
+    return { ok: false, error: MY_BUGS_LOAD_ERROR };
+  }
+  const bugs = [...mine.data, ...review.data.filter((b) => b.assigned_to !== userId)];
+
   const projectIds = [...new Set(bugs.map((b) => b.project_id))];
-  const { data: projectRows } = projectIds.length > 0 ? await supabase.from("projects").select("id, name, teams!inner(id, department_id, departments!inner(id, organization_id, organizations!inner(name)))").in("id", projectIds) : { data: [] };
+  const { data: projectRows, error: projectError } =
+    projectIds.length > 0 ? await supabase.from("projects").select("id, name, teams!projects_team_id_fkey!inner(id, department_id, departments!inner(id, organization_id, organizations!inner(name)))").in("id", projectIds) : { data: [], error: null };
+  if (projectError) {
+    console.error("[bugs] my bugs projects query failed", projectError.message);
+    return { ok: false, error: MY_BUGS_LOAD_ERROR };
+  }
   type P = { id: string; name: string; teams: { id: string; departments: { id: string; organization_id: string; organizations: { name: string } } } };
   const byId = new Map(((projectRows ?? []) as unknown as P[]).map((p) => [p.id, p]));
-  const items = bugs.map((b) => {
+
+  // The AI's latest fix plan, when there is one. Supplementary: without it the bug is still listed.
+  const plans = new Map<string, string>();
+  if (mine.data.length > 0) {
+    const { data: fixes } = await supabase.from("repository_bug_fixes").select("bug_id, version, plan").in("bug_id", mine.data.map((b) => b.id)).order("version", { ascending: false }).limit(500);
+    for (const f of fixes ?? []) {
+      const summary = (f.plan as { summary?: unknown } | null)?.summary;
+      if (typeof summary === "string" && summary.trim() && !plans.has(f.bug_id)) plans.set(f.bug_id, summary.trim());
+    }
+  }
+
+  const items: MyBugItem[] = bugs.flatMap((b) => {
     const p = byId.get(b.project_id);
-    return {
-      id: b.id,
-      title: b.title,
-      severity: b.severity as BugSeverity,
-      status: b.status,
-      category: b.category,
-      filePath: b.file_path,
-      mine: b.assigned_to === userId,
-      projectName: p?.name ?? "",
-      organizationName: p?.teams.departments.organizations.name ?? "",
-      href: p ? `/organizations/${p.teams.departments.organization_id}/departments/${p.teams.departments.id}/teams/${p.teams.id}/projects/${p.id}/bugs/${b.id}` : "#",
-    };
+    // A bug whose project chain is not readable cannot be opened; listing it with a dead link would only mislead.
+    if (!p) return [];
+    return [
+      {
+        id: b.id,
+        ref: bugRef(b.id),
+        title: b.title,
+        severity: b.severity as BugSeverity,
+        status: b.status,
+        category: b.category,
+        filePath: b.file_path,
+        mine: b.assigned_to === userId,
+        projectName: p.name,
+        organizationName: p.teams.departments.organizations.name,
+        href: `/organizations/${p.teams.departments.organization_id}/departments/${p.teams.departments.id}/teams/${p.teams.id}/projects/${p.id}/bugs/${b.id}`,
+        assignedAt: b.assigned_at,
+        explanation: b.description?.trim() || null,
+        fixPlan: plans.get(b.id) ?? null,
+      },
+    ];
   });
-  const rank = (b: { severity: BugSeverity }) => SEVERITY_RANK[b.severity];
-  return {
-    assigned: items.filter((b) => b.mine).sort((a, b) => rank(b) - rank(a)),
-    toReview: items.filter((b) => !b.mine).sort((a, b) => rank(b) - rank(a)),
-  };
+  return { ok: true, ...splitMyBugs(items) };
 }

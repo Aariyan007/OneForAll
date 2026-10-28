@@ -45,6 +45,17 @@ test("a batch spreads over the team: each assignment counts against that person'
   assert.deepEqual(counts, { x: 2, y: 2 });
 });
 
+test("auto-reassigning an assigned bug picks someone else and never the current assignee", () => {
+  const plan = planAutoAssignment([{ id: "1", ...bug, assignedTo: "x" }], [person("x", { skills: ["React"], onProjectTeam: true }), person("y")]);
+  assert.equal(plan[0].userId, "y");
+});
+
+test("auto-reassigning with nobody else eligible leaves the bug where it is and says so", () => {
+  const plan = planAutoAssignment([{ id: "1", ...bug, assignedTo: "x" }], [person("x")]);
+  assert.equal(plan[0].userId, null);
+  assert.match(plan[0].reason, /No other eligible person/);
+});
+
 test("with nobody eligible a bug stays unassigned and says why", () => {
   const plan = planAutoAssignment([{ id: "1", ...bug }], [person("gone", { availability: "UNAVAILABLE" })]);
   assert.equal(plan[0].userId, null);

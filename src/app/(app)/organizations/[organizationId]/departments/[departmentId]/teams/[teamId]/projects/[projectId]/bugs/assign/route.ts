@@ -52,7 +52,13 @@ export async function POST(request: NextRequest, context: Ctx) {
   try {
     if (body.data.op === "auto") {
       const summary = await autoAssign(project.project.id, body.data.bugIds);
-      return summary ? json(summary) : json({ error: "Only organization owners and admins can assign bugs." }, 403);
+      if (!summary) return json({ error: "Only organization owners and admins can assign bugs." }, 403);
+      // Bugs named by the caller that all stayed put are a failure, not a success: a 200 here made the UI reload as if
+      // the assignment had happened. Bulk runs report their per-bug outcome in the summary instead.
+      if (body.data.bugIds?.length && summary.assigned.length === 0) {
+        return json({ ...summary, error: summary.left[0]?.reason ?? "The bug was not assigned." }, 409);
+      }
+      return json(summary);
     }
     // The bug must belong to THIS project; the database function re-checks everything else.
     const { data: bug } = await supabase.from("repository_bugs").select("id").eq("id", body.data.bugId).eq("project_id", project.project.id).maybeSingle();

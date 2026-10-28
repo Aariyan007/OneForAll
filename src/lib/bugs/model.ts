@@ -98,4 +98,10 @@ export function canMoveBug(from: BugStatus, to: BugStatus): boolean {
 
 export const OPEN_BUG_STATUSES: readonly BugStatus[] = BUG_STATUSES.filter((s) => s !== "RESOLVED" && s !== "REJECTED" && s !== "CANCELLED");
 
+// Stages in which an admin may (re)assign a bug. Mirrors the check in public.assign_bug (migration 20261029000003).
+export const REASSIGNABLE_BUG_STATUSES: readonly BugStatus[] = ["DETECTED", "TRIAGED", "REOPENED", "ASSIGNED", "IN_PROGRESS", "BLOCKED"];
+
+// Stages in which someone other than the assignee reviews or verifies the fix.
+export const REVIEW_BUG_STATUSES: readonly BugStatus[] = ["CODE_REVIEW", "QA_VERIFICATION"];
+
 export const SEVERITY_RANK: Record<BugSeverity, number> = { CRITICAL: 5, HIGH: 4, MEDIUM: 3, LOW: 2, INFO: 1 };

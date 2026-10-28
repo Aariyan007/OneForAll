@@ -100,15 +100,21 @@ const SEVERITY_ORDER = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"];
 
 export type AutoAssignment = { bugId: string; userId: string; reason: string } | { bugId: string; userId: null; reason: string };
 
-export function planAutoAssignment(bugs: readonly (BugFacts & { id: string })[], candidates: readonly Candidate[]): AutoAssignment[] {
+// A bug that already has an assignee is being REassigned: the current assignee is left out, otherwise "auto-assign" could
+// pick the same person and change nothing.
+export function planAutoAssignment(bugs: readonly (BugFacts & { id: string; assignedTo?: string | null })[], candidates: readonly Candidate[]): AutoAssignment[] {
   const load = new Map(candidates.map((c) => [c.userId, c.openBugs]));
   const ordered = [...bugs].sort((a, b) => SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity) || a.id.localeCompare(b.id));
   const result: AutoAssignment[] = [];
   for (const bug of ordered) {
-    const current = candidates.map((c) => ({ ...c, openBugs: load.get(c.userId) ?? c.openBugs }));
+    const current = candidates.filter((c) => c.userId !== bug.assignedTo).map((c) => ({ ...c, openBugs: load.get(c.userId) ?? c.openBugs }));
     const best = rankCandidates(current, bug)[0];
     if (!best) {
-      result.push({ bugId: bug.id, userId: null, reason: "No eligible person (everyone is unavailable or cannot see this project)." });
+      result.push({
+        bugId: bug.id,
+        userId: null,
+        reason: bug.assignedTo ? "No other eligible person to give this bug to." : "No eligible person (everyone is unavailable or cannot see this project).",
+      });
       continue;
     }
     load.set(best.candidate.userId, (load.get(best.candidate.userId) ?? 0) + 1);

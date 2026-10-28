@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Alert } from "@/components/ui/alert";
 import { Button, Spinner } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { REASSIGNABLE_BUG_STATUSES } from "@/lib/bugs/model";
 import type { FixView } from "@/server/bugs/detail";
 
 // Client controls of the bug workspace: assignment, the stage buttons and the AI fix plan with its approval controls.
@@ -29,7 +30,7 @@ export function AssignPanel({ bugId, assignUrl, current, status, isAdmin }: { bu
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
-  const reassignable = ["DETECTED", "TRIAGED", "REOPENED", "ASSIGNED", "IN_PROGRESS", "BLOCKED"].includes(status);
+  const reassignable = (REASSIGNABLE_BUG_STATUSES as readonly string[]).includes(status);
 
   async function load() {
     setOpen(true);

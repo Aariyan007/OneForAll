@@ -4,7 +4,7 @@ import { BODY_LIMITS } from "./src/server/repository-sources/limits";
 
 const nextConfig: NextConfig = {
   async headers() {
-    return [{ source: "/:path*", headers: securityHeaders({ enforceCsp: true }) }];
+    return [{ source: "/:path*", headers: securityHeaders({ enforceCsp: true, dev: process.env.NODE_ENV === "development" }) }];
   },
   // web-tree-sitter loads its own WASM runtime and grammar files from node_modules at runtime (Phase 2H structure
   // analysis), so it must stay a plain Node dependency instead of being bundled.

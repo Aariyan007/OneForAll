@@ -1,5 +1,6 @@
 import "server-only";
 import { type BugFacts, type Candidate, planAutoAssignment, rankCandidates, type Ranked } from "@/lib/bugs/assign";
+import { REASSIGNABLE_BUG_STATUSES } from "@/lib/bugs/model";
 import { createClient } from "@/lib/supabase/server";
 
 // Assignment as the signed-in admin. The database decides who is eligible (list_bug_assignment_candidates) and re-checks
@@ -58,19 +59,25 @@ export async function unassign(bugId: string, reason: string) {
 
 export type AutoAssignSummary = { assigned: { bugId: string; title: string; userId: string; name: string; reason: string }[]; left: { bugId: string; title: string; reason: string }[] };
 
-// Assigns the given bugs (or every unassigned open bug of the project) to the best eligible people, spreading the load.
+// Assigns the given bugs, or every unassigned open bug of the project when none are named, to the best eligible people,
+// spreading the load. Named bugs may already be assigned (that is a reassignment). A named bug that cannot be assigned is
+// reported in `left` instead of being dropped, so the caller never sees "success" for a bug that did not move.
 export async function autoAssign(projectId: string, bugIds?: string[]): Promise<AutoAssignSummary | null> {
   const candidates = await listCandidates(projectId);
   if (!candidates) return null;
   const supabase = await createClient();
-  let query = supabase.from("repository_bugs").select("id, title, category, severity, file_path").eq("project_id", projectId).is("assigned_to", null).in("status", ["DETECTED", "TRIAGED", "REOPENED"]);
-  if (bugIds && bugIds.length > 0) query = query.in("id", bugIds);
+  const named = bugIds && bugIds.length > 0 ? bugIds : null;
+  let query = supabase.from("repository_bugs").select("id, title, category, severity, file_path, assigned_to").eq("project_id", projectId);
+  query = named ? query.in("id", named).in("status", [...REASSIGNABLE_BUG_STATUSES]) : query.is("assigned_to", null).in("status", ["DETECTED", "TRIAGED", "REOPENED"]);
   const { data: bugs, error } = await query.limit(100);
   if (error) return null;
   const titles = new Map(bugs.map((b) => [b.id, b.title]));
-  const plan = planAutoAssignment(bugs.map((b) => ({ id: b.id, category: b.category, severity: b.severity, filePath: b.file_path })), candidates);
+  const plan = planAutoAssignment(bugs.map((b) => ({ id: b.id, category: b.category, severity: b.severity, filePath: b.file_path, assignedTo: b.assigned_to })), candidates);
   const names = new Map(candidates.map((c) => [c.userId, c.name]));
   const summary: AutoAssignSummary = { assigned: [], left: [] };
+  for (const id of named ?? []) {
+    if (!titles.has(id)) summary.left.push({ bugId: id, title: "", reason: "That bug was not found in this project or is in a stage that cannot be assigned." });
+  }
   for (const item of plan) {
     if (!item.userId) {
       summary.left.push({ bugId: item.bugId, title: titles.get(item.bugId) ?? "", reason: item.reason });
