@@ -20,7 +20,7 @@ const HEADERS = { "Cache-Control": "private, no-store" };
 const json = (body: unknown, status = 200) => NextResponse.json(body, { status, headers: HEADERS });
 
 const bodySchema = z.discriminatedUnion("op", [
-  z.object({ op: z.literal("start"), snapshotId: z.uuid() }).strict(),
+  z.object({ op: z.literal("start"), snapshotId: z.uuid(), force: z.boolean().optional() }).strict(),
   z.object({ op: z.enum(["step", "resume", "cancel"]), snapshotId: z.uuid(), scanId: z.uuid() }).strict(),
 ]);
 
@@ -29,8 +29,8 @@ type Ctx = RouteContext<"/organizations/[organizationId]/departments/[department
 function publicScan(scan: Awaited<ReturnType<typeof latestScan>>) {
   if (!scan) return null;
   const { plan, ...rest } = scan;
-  void plan;
-  return rest;
+  const info = plan as { unchangedFiles?: number; unchangedTokensSaved?: number };
+  return { ...rest, unchangedFiles: info.unchangedFiles ?? 0, unchangedTokensSaved: info.unchangedTokensSaved ?? 0 };
 }
 
 export async function GET(request: NextRequest, context: Ctx) {
@@ -60,7 +60,7 @@ export async function POST(request: NextRequest, context: Ctx) {
       if (!aiConfigured()) return json({ error: "The AI assistant is not configured on this server (GEMINI_API_KEY is missing)." }, 503);
       const loaded = await loadProjectGraph(p.organizationId, p.departmentId, p.teamId, p.projectId, access.snapshot.id);
       if (!loaded) return json({ error: "Not found." }, 404);
-      const started = await createScan(access.snapshot.id, loaded.data);
+      const started = await createScan(access.snapshot.id, loaded.data, { projectId: access.context.project.id, force: body.data.force });
       if (!started.ok) return json({ error: started.error }, started.status);
       return json({ scan: publicScan(await getScan(started.scanId, access.snapshot.id)) });
     }

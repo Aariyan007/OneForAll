@@ -52,6 +52,45 @@
   --topbar-h: 56px;
 }
 
+/* Light theme: the same tokens, white surfaces. Chosen with <html data-theme="light"> (set before first paint by the
+   inline script in layout.tsx, so there is no flash). Status colours are darker so text on light surfaces keeps >= 4.5:1. */
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --bg: #f5f6f8;
+  --bg-subtle: #eef0f3;
+  --surface: #ffffff;
+  --surface-2: #f4f6f8;
+  --surface-3: #e8ebef;
+
+  --border: #e1e4e9;
+  --border-strong: #cdd2da;
+
+  --fg: #14171c;
+  --fg-2: #444b58;
+  --fg-3: #636b79;
+
+  --accent: #4a59d8;
+  --accent-strong: #3b49c4;
+  --accent-fg: #ffffff;
+  --success: #0e7a52;
+  --warning: #96560a;
+  --danger: #c0262d;
+  --info: #1769c4;
+
+  --shadow-1: 0 1px 0 0 rgb(255 255 255 / 0.6) inset, 0 1px 2px 0 rgb(16 24 40 / 0.08);
+  --shadow-2: 0 1px 0 0 rgb(255 255 255 / 0.6) inset, 0 8px 24px -8px rgb(16 24 40 / 0.18);
+  --shadow-pop: 0 16px 48px -12px rgb(16 24 40 / 0.28), 0 0 0 1px var(--border-strong);
+
+  --bg-glow: rgb(74 89 216 / 0.06);
+  --selection: rgb(74 89 216 / 0.22);
+}
+
+:root {
+  --bg-glow: rgb(123 140 255 / 0.07);
+  --selection: rgb(123 140 255 / 0.3);
+}
+
 @theme inline {
   --color-bg: var(--bg);
   --color-bg-subtle: var(--bg-subtle);
@@ -97,7 +136,7 @@
 
   body {
     background:
-      radial-gradient(1200px 480px at 70% -180px, rgb(123 140 255 / 0.07), transparent 70%),
+      radial-gradient(1200px 480px at 70% -180px, var(--bg-glow), transparent 70%),
       var(--bg);
     color: var(--fg);
     font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
@@ -106,7 +145,7 @@
   }
 
   ::selection {
-    background: rgb(123 140 255 / 0.3);
+    background: var(--selection);
   }
 
   * {

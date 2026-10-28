@@ -3,8 +3,10 @@ import { createHash } from "node:crypto";
 // Pure parts of the repository bug scan: which files are worth scanning, how they are batched for the token budget,
 // how a finding is de-duplicated across scans, and whether a finding's evidence really is in the code it points at.
 
-export type ScanFile = { path: string; language: string | null; sizeBytes: number; hasText: boolean; symbols: number; inDegree: number };
-export type SkipReason = "no_text" | "not_source" | "generated" | "too_large" | "over_file_cap";
+// `unchanged`: this exact content (same hash) was already scanned successfully, so scanning it again would spend tokens
+// and find nothing new.
+export type ScanFile = { path: string; language: string | null; sizeBytes: number; hasText: boolean; symbols: number; inDegree: number; unchanged?: boolean };
+export type SkipReason = "no_text" | "not_source" | "generated" | "too_large" | "over_file_cap" | "unchanged";
 // One piece of the scan: a whole file, or part `part` of `parts` equal line ranges of a large file (15 lines of overlap).
 export type ScanUnit = { path: string; part?: number; parts?: number };
 export type ScanPlan = {
@@ -38,6 +40,7 @@ export function planScan(files: readonly ScanFile[], options: ScanOptions = DEFA
     if (!file.hasText) skipped.push({ path: file.path, reason: "no_text" });
     else if (GENERATED.test(file.path)) skipped.push({ path: file.path, reason: "generated" });
     else if (!SOURCE_EXT.test(file.path) && !CONFIG_NAMES.test(file.path)) skipped.push({ path: file.path, reason: "not_source" });
+    else if (file.unchanged) skipped.push({ path: file.path, reason: "unchanged" });
     else if (file.sizeBytes > options.maxFileBytes) skipped.push({ path: file.path, reason: "too_large" });
     else candidates.push(file);
   }

@@ -28,7 +28,9 @@ export default async function BugsPage({
   const { organization, department, team, project, counts } = data;
   const projectPath = `/organizations/${organization.id}/departments/${department.id}/teams/${team.id}/projects/${project.id}`;
   const filtered = Object.keys(filters).length > 0;
-  const scan = data.scan ? ({ ...data.scan, plan: undefined } as unknown as PublicScan) : null;
+  const scan = data.scan
+    ? ({ ...data.scan, plan: undefined, unchangedFiles: (data.scan.plan as { unchangedFiles?: number }).unchangedFiles ?? 0, unchangedTokensSaved: (data.scan.plan as { unchangedTokensSaved?: number }).unchangedTokensSaved ?? 0 } as unknown as PublicScan)
+    : null;
 
   return (
     <PageBody>

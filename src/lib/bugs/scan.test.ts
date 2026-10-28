@@ -82,3 +82,10 @@ test("unitRange covers the whole file once, with a small overlap between parts",
   assert.deepEqual(ranges, [{ start: 1, end: 100 }, { start: 86, end: 200 }, { start: 186, end: 300 }]);
   assert.equal(unitRange({ path: "a", part: 3, parts: 3 }, 299).end, 299);
 });
+
+test("files already scanned with the same content are skipped on a rescan, and counted as saved", () => {
+  const plan = planScan([file("src/a.ts", { unchanged: true }), file("src/b.ts"), file("src/c.ts", { unchanged: true, sizeBytes: 9000 })]);
+  assert.deepEqual(plan.batches, [{ units: [{ path: "src/b.ts" }] }]);
+  assert.deepEqual(plan.skipped.map((s) => s.reason).sort(), ["unchanged", "unchanged"]);
+  assert.equal(plan.filesPlanned, 1);
+});

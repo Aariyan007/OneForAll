@@ -49,15 +49,59 @@ export async function getScan(scanId: string, snapshotId: string): Promise<ScanR
 
 export type StartScanResult = { ok: true; scanId: string; batches: number; filesPlanned: number; filesTotal: number } | { ok: false; status: number; error: string };
 
-export async function createScan(snapshotId: string, graph: ProjectGraphData): Promise<StartScanResult> {
+// Paths whose current content was already scanned successfully by the project's last scan: every unit of the file was
+// in a completed batch and the file's hash has not changed since. Rescanning them would spend tokens for nothing.
+async function unchangedPaths(projectId: string, snapshotId: string): Promise<Set<string>> {
+  const supabase = await createClient();
+  const { data: previous } = await supabase
+    .from("repository_bug_scans")
+    .select("snapshot_id, plan, completed_batches")
+    .eq("project_id", projectId)
+    .in("status", ["COMPLETED", "PARTIAL", "CANCELLED"])
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!previous) return new Set();
+  const batches = ((previous.plan as { batches?: { units: ScanUnit[] }[] }).batches ?? []);
+  const total = new Map<string, number>();
+  const done = new Map<string, number>();
+  batches.forEach((batch, index) => {
+    for (const unit of batch.units) {
+      total.set(unit.path, (total.get(unit.path) ?? 0) + 1);
+      if (previous.completed_batches.includes(index)) done.set(unit.path, (done.get(unit.path) ?? 0) + 1);
+    }
+  });
+  const scanned = [...total.keys()].filter((path) => done.get(path) === total.get(path));
+  if (scanned.length === 0) return new Set();
+  const hashes = async (id: string) => {
+    const out = new Map<string, string>();
+    for (let i = 0; i < scanned.length; i += 200) {
+      const { data } = await supabase.from("repository_files").select("path, content_hash").eq("snapshot_id", id).in("path", scanned.slice(i, i + 200));
+      for (const row of data ?? []) out.set(row.path, row.content_hash);
+    }
+    return out;
+  };
+  const [before, now] = await Promise.all([hashes(previous.snapshot_id), hashes(snapshotId)]);
+  return new Set(scanned.filter((path) => before.get(path) && before.get(path) === now.get(path)));
+}
+
+export async function createScan(snapshotId: string, graph: ProjectGraphData, options: { projectId: string; force?: boolean }): Promise<StartScanResult> {
+  const unchanged = options.force ? new Set<string>() : await unchangedPaths(options.projectId, snapshotId);
   const inDegree = new Map<string, number>();
   for (const edge of graph.edges) inDegree.set(edge.target, (inDegree.get(edge.target) ?? 0) + 1);
-  const files: ScanFile[] = graph.files.map((f) => ({ path: f.path, language: f.language, sizeBytes: f.sizeBytes, hasText: f.hasText, symbols: f.symbols, inDegree: inDegree.get(f.id) ?? 0 }));
+  const files: ScanFile[] = graph.files.map((f) => ({ path: f.path, language: f.language, sizeBytes: f.sizeBytes, hasText: f.hasText, symbols: f.symbols, inDegree: inDegree.get(f.id) ?? 0, unchanged: unchanged.has(f.path) }));
   const plan = planScan(files);
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("start_bug_scan", {
     p_snapshot_id: snapshotId,
-    p_plan: { batches: plan.batches, skipped: plan.skipped.slice(0, 400), skippedCount: plan.skipped.length } as unknown as Json,
+    p_plan: {
+      batches: plan.batches,
+      skipped: plan.skipped.slice(0, 400),
+      skippedCount: plan.skipped.length,
+      unchangedFiles: plan.skipped.filter((s) => s.reason === "unchanged").length,
+      // ~4 characters per token, the same documented approximation the token budget uses.
+      unchangedTokensSaved: Math.round(graph.files.filter((f) => unchanged.has(f.path)).reduce((n, f) => n + f.sizeBytes, 0) / 4),
+    } as unknown as Json,
     p_files_total: plan.filesTotal,
     p_files_planned: plan.filesPlanned,
   });

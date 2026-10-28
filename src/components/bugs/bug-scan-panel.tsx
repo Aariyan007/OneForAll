@@ -22,6 +22,8 @@ export type PublicScan = {
   error_message: string | null;
   created_at: string;
   completed_at: string | null;
+  unchangedFiles?: number;
+  unchangedTokensSaved?: number;
 };
 
 type Props = { endpoint: string; snapshotId: string; snapshotLabel: string; initialScan: PublicScan | null; configured: boolean };
@@ -74,10 +76,10 @@ export function BugScanPanel({ endpoint, snapshotId, snapshotLabel, initialScan,
     }
   }
 
-  async function start() {
+  async function start(force = false) {
     setError(null);
     setBusy(true);
-    const result = await call(endpoint, { op: "start", snapshotId });
+    const result = await call(endpoint, { op: "start", snapshotId, ...(force ? { force: true } : {}) });
     if (result.error || !result.scan) {
       setBusy(false);
       setError(result.error ?? "The scan could not be started.");
@@ -142,8 +144,13 @@ export function BugScanPanel({ endpoint, snapshotId, snapshotLabel, initialScan,
             </Button>
           )}
           {!running && (
-            <Button variant="primary" size="sm" onClick={start} disabled={busy || !configured}>
-              {busy ? <Spinner /> : null} {scan ? "Scan again" : "Scan this repository"}
+            <Button variant="primary" size="sm" onClick={() => start(false)} disabled={busy || !configured}>
+              {busy ? <Spinner /> : null} {scan ? "Scan changes only" : "Scan this repository"}
+            </Button>
+          )}
+          {!running && scan && (
+            <Button variant="secondary" size="sm" onClick={() => start(true)} disabled={busy || !configured}>
+              Rescan everything
             </Button>
           )}
         </div>
@@ -177,6 +184,7 @@ export function BugScanPanel({ endpoint, snapshotId, snapshotLabel, initialScan,
           <p className="t-small text-fg-3">
             {scan.bugs_new} new bugs, {scan.bugs_found - scan.bugs_new} already known · {(scan.input_tokens + scan.output_tokens).toLocaleString()} tokens
             {scan.failed_batches.length > 0 && ` · ${scan.failed_batches.length} batch(es) failed`}
+            {(scan.unchangedFiles ?? 0) > 0 && ` · ${scan.unchangedFiles} unchanged file(s) skipped (≈${(scan.unchangedTokensSaved ?? 0).toLocaleString()} tokens not spent)`}
           </p>
           {scan.error_message && <p className="t-small text-fg-3">{scan.error_message}</p>}
         </div>
