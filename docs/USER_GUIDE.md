@@ -204,10 +204,12 @@ A snapshot is the code of one exact commit.
 3. The app records every file, stores the source text, and analyses the code structure.
 
 **Option B — import from GitHub**
-1. Project page → **Import from GitHub**, pick the branch and commit, and import. Public repositories need no token;
-   private ones need a fine-grained token under **Integrations**.
+1. Project page → **Import from GitHub**, pick the branch, click **Resolve commit** (this pins the exact commit; the
+   **Import this commit** button stays disabled until you do), then **Import this commit**. Public repositories need no
+   token; private ones need a fine-grained token under **Integrations**.
 
-Files such as `.env`, private keys and `node_modules` are skipped automatically and counted on the snapshot page.
+Files such as `.env`, private keys and `node_modules` are skipped automatically and counted on the snapshot page, and so
+are symbolic links (they are never followed).
 
 > Snapshot recorded before the AI Assistant existed? Upload the same ZIP again on its page to store its source text.
 
@@ -266,4 +268,5 @@ In the left menu click **Settings**:
 | Shared `trycloudflare.com` link stopped working | Quick tunnels expire; start a new one and update `APP_URL` |
 | An existing page shows "not found" in development | `npm run dev:clean` |
 | `npm run build` says another build is running | `rm -f .next/lock`, then build again |
+| Tests, installs or builds hang for minutes (or `os error 89`) | The project is in an iCloud-synced folder and macOS offloaded files (check with `find . -flags +dataless \| head`). Fix: in Finder right-click the project folder → **Keep Downloaded**, or move the project out of Desktop/Documents. A quick repair is `rm -rf node_modules .next && npm ci` |
 | Build fails with `os error 89` on a file | The project is in an iCloud-synced folder and macOS offloaded the file. In Finder, right-click the project folder → **Keep Downloaded**, or move the project out of Desktop/Documents |
