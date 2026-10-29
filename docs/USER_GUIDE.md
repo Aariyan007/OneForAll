@@ -51,6 +51,7 @@ Open `.env.local` and fill it in:
 | `STRUCTURE_PERSIST_KEY` | Generate one (command below) |
 | `INTEGRATION_ENCRYPTION_KEY` | Generate another one (command below) |
 | `GEMINI_API_KEY` | Your Gemini key, for the AI Assistant (optional) |
+| `GROQ_API_KEY`, `OPENROUTER_API_KEY` | Groq and OpenRouter keys, extra providers for the AI Assistant (optional; tasks are routed to whichever are set, with automatic fallback) |
 | `SMTP_USER`, `SMTP_PASSWORD` | Gmail address and its 16-letter app password, for invitation emails (optional) |
 | `APP_URL` | The address people open, if you share the app (see 1.5); leave empty for local use |
 
@@ -260,7 +261,7 @@ In the left menu click **Settings**:
 | `docker info` fails or `db:start` hangs | Start Docker Desktop and wait until it is running |
 | Health check shows `"database":"unreachable"` | The database is stopped: `npm run db:start` |
 | Uploads or analysis say the key is missing or rejected | `STRUCTURE_PERSIST_KEY` in `.env.local` and the vault secret differ; redo Step 4 of 1.2 and restart |
-| AI Assistant says "not configured" | Add `GEMINI_API_KEY` to `.env.local` and restart the app |
+| AI Assistant says "not configured" | Add `GEMINI_API_KEY`, `GROQ_API_KEY` or `OPENROUTER_API_KEY` to `.env.local` and restart the app |
 | AI Assistant says "no stored source text" | Upload the same ZIP again on the snapshot page |
 | An AI run is slow or falls back to a smaller model | Normal on the Gemini free tier when the main model is busy |
 | Invitation email does not arrive | Check spam; check `SMTP_USER` / `SMTP_PASSWORD` (app password, not your Gmail password); you can still copy the link |

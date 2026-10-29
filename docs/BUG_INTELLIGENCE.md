@@ -121,9 +121,10 @@ Enforced by RLS (reads) and `SECURITY DEFINER` functions (writes). Clients have 
 
 ## 7. Orchestrator and token optimisation (what is integrated)
 
-* Only the existing Gemini provider is used (`GEMINI_API_KEY`; tiers `AI_MODEL_FAST` / `AI_MODEL_STANDARD`). There is no
-  GPT/Claude/Groq fallback and none is claimed. Fallback goes down from the standard to the fast Gemini model and is
-  recorded on the run.
+* Providers are Gemini (`GEMINI_API_KEY`; tiers `AI_MODEL_FAST` / `AI_MODEL_STANDARD`), Groq (`GROQ_API_KEY`) and
+  OpenRouter (`OPENROUTER_API_KEY`), all server-side. `src/server/ai/routing.ts` picks the provider and model per task and the
+  orchestrator walks to the next eligible one when a call fails (bounded retries; see `docs/AI_ROUTING.md`). Every run records
+  the provider, the attempts and the usage it actually got.
 * Bug scans and fix plans run through `runJob`, so they get the same state machine, deadline, retries, redaction of
   secrets before text leaves the server, untrusted-data wrapping, output-schema validation, and per-run usage / cost in
   `ai_runs`. They have their own daily limit (300 runs per 24 h) so a scan cannot use up the interactive 50.

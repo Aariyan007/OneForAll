@@ -1,5 +1,5 @@
-import { type Content, FinishReason, GoogleGenAI, type Part } from "@google/genai";
-import { mapGeminiError, mapUsage } from "./gemini-mapping";
+import { FinishReason, GoogleGenAI } from "@google/genai";
+import { mapGeminiError, mapUsage, toContents } from "./gemini-mapping";
 import { type FinishReason as LlmFinishReason, LlmError, type LlmProvider, type LlmRequest, type LlmResponse } from "./types";
 
 // Google Gemini adapter (@google/genai, models.generateContent). Import it through ./gemini (server-only guard) in the
@@ -7,17 +7,6 @@ import { type FinishReason as LlmFinishReason, LlmError, type LlmProvider, type 
 // here, so it reaches the browser only if a caller sends it there.
 // Function calling is driven by the orchestrator (automatic function calling and automatic continuation are off), and
 // each model turn is sent back exactly as received, which preserves Gemini 3 thought signatures across tool calls.
-
-function toContents(request: LlmRequest): Content[] {
-  return request.turns.map((turn): Content => {
-    if (turn.role === "user") return { role: "user", parts: [{ text: turn.text }] };
-    if (turn.role === "model") return turn.raw as Content;
-    return {
-      role: "user",
-      parts: turn.results.map((r): Part => ({ functionResponse: { id: r.id, name: r.name, response: r.result } })),
-    };
-  });
-}
 
 function finishReason(reason: FinishReason | undefined): LlmFinishReason {
   switch (reason) {
@@ -79,6 +68,7 @@ export function createGeminiProvider(apiKey: string): LlmProvider {
           .map((p) => ({ id: p.functionCall!.id, name: p.functionCall!.name!, args: p.functionCall!.args ?? {} })),
         finishReason: finishReason(candidate.finishReason),
         usage: mapUsage(response.usageMetadata),
+        usageReported: response.usageMetadata !== undefined,
         raw: candidate.content,
         modelVersion: response.modelVersion,
       };

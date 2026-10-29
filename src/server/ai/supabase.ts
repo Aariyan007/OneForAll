@@ -163,6 +163,13 @@ export async function createRunStore(runId: string): Promise<PersistentRunStore>
           fallback_used: outcome.fallback,
           citations_dropped: outcome.citationsDropped,
           context_tokens_estimate: outcome.contextTokensEstimate,
+          provider: outcome.provider ?? null,
+          usage_reported: outcome.usageReported,
+          cost_known: outcome.costKnown,
+          // Omitted (not 0) when nothing could be estimated, so the column stays NULL = "not measured".
+          ...(outcome.baselineTokensEstimate > 0 ? { baseline_tokens_estimate: outcome.baselineTokensEstimate } : {}),
+          route: { category: outcome.category ?? null, reason: outcome.routeReason ?? null, attempts: outcome.attemptLog },
+          techniques: outcome.techniques,
         },
       });
       if (error) throw new Error("run finish write failed");

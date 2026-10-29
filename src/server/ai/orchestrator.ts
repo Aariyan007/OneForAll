@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { estimateBaselineTokens } from "@/lib/ai/measure";
 import { estimateTokens, inputBudget } from "./budget";
 import { validateCitations } from "./citations";
 import { extractJson, lineCount } from "./context";
@@ -7,10 +8,11 @@ import type { ModelRegistry } from "./models";
 import { type LlmProvider, type LlmRequest, type LlmResponse, type LlmTurn, LlmError } from "./provider/types";
 import { RETRY_POLICY, backoffMillis, isRetryable } from "./retry";
 import { chooseTier } from "./router";
+import { type Candidate, type Cooldowns, type TaskCategory, emptyPlanCategory, planRoute } from "./routing";
 import { callSignal } from "./signals";
 import { canTransition } from "./state";
 import { type RepoReader, isSafeRepoPath, runTool, toolDeclarations } from "./tools";
-import { type Citation, type JobType, type ProviderErrorCategory, type RunErrorCategory, type RunState, type Tier, type Usage, ZERO_USAGE, addUsage } from "./types";
+import { type AttemptRecord, type Citation, type JobType, type ProviderErrorCategory, type ProviderId, type RunErrorCategory, type RunState, type Tier, type Usage, ZERO_USAGE, addUsage } from "./types";
 
 // Runs one AI job end to end with explicit, validated state transitions:
 //
@@ -43,13 +45,18 @@ export type RunStore = {
 
 export type RunEvent =
   | { type: "state"; state: RunState }
-  | { type: "model"; tier: Tier; model: string; ms: number; usage: Usage; attempt: number }
+  | { type: "route"; category: TaskCategory; provider: ProviderId; model: string; reason: string }
+  | { type: "model"; tier: Tier; provider: ProviderId; model: string; ms: number; usage: Usage; attempt: number }
   | { type: "retry"; category: ProviderErrorCategory; delayMs: number }
-  | { type: "fallback"; from: Tier; to: Tier }
+  | { type: "fallback"; from: Tier; to: Tier; fromProvider: ProviderId; toProvider: ProviderId }
   | { type: "tool"; name: string; ok: boolean; ms: number };
 
 export type OrchestratorDeps = {
-  provider: LlmProvider;
+  // One adapter per configured provider. `provider` alone (tests, the evaluation script) answers for every candidate.
+  providers?: Partial<Record<ProviderId, LlmProvider>>;
+  provider?: LlmProvider;
+  // Remembers recent provider failures between runs of this process (routing.ts). Optional.
+  cooldowns?: Cooldowns;
   registry: ModelRegistry;
   reader: RepoReader;
   store: RunStore;
@@ -68,6 +75,20 @@ export type RunOutcome = {
   usage: Usage;
   tier?: Tier;
   model?: string;
+  provider?: ProviderId;
+  category?: TaskCategory;
+  // Why this provider and model were chosen first; concise, no prompts or keys.
+  routeReason?: string;
+  // Every provider call in order, successes and failures. Tokens of failed calls are unavailable (providers report none).
+  attemptLog: AttemptRecord[];
+  // True when every successful call reported token usage; false when any did not, or none succeeded.
+  usageReported: boolean;
+  // False when a call's cost could not be determined (unknown price and none reported): costUsd is then a lower bound.
+  costKnown: boolean;
+  // Estimated tokens of sending the whole stored snapshot in one request (see lib/ai/measure.ts); 0 when unknown.
+  baselineTokensEstimate: number;
+  // What the pipeline actually did to keep the request small, derived from this run.
+  techniques: string[];
   costUsd: number;
   turns: number;
   toolCalls: number;
@@ -81,7 +102,8 @@ export type RunOutcome = {
 };
 
 const SAFE_MESSAGES: Record<RunErrorCategory, string> = {
-  auth: "The AI provider rejected the API key. An administrator must check GEMINI_API_KEY.",
+  auth: "The AI provider rejected its API key. An administrator must check the provider keys (GEMINI_API_KEY, GROQ_API_KEY, OPENROUTER_API_KEY).",
+  unsupported_model: "The configured AI model is not available from the provider. An administrator must check the model ids.",
   quota: "The AI provider's quota is used up. Try again later.",
   rate_limited: "The AI provider is rate limiting requests. Try again in a minute.",
   context_overflow: "The request was too large for the model. Ask about a smaller part of the code.",
@@ -91,7 +113,7 @@ const SAFE_MESSAGES: Record<RunErrorCategory, string> = {
   timeout: "The AI provider did not answer in time.",
   safety_blocked: "The AI provider blocked the response.",
   bad_output: "The model did not return a valid answer. Try rephrasing.",
-  not_configured: "The AI assistant is not configured on this server (GEMINI_API_KEY is missing).",
+  not_configured: "The AI assistant is not configured on this server (set GEMINI_API_KEY, GROQ_API_KEY or OPENROUTER_API_KEY).",
   disabled: "The AI assistant is turned off for this organization.",
   invalid_input: "The request is not valid.",
   no_source: "This snapshot has no stored source text. Upload the same archive again on the snapshot page to store it.",
@@ -117,6 +139,11 @@ class Stop extends Error {
   }
 }
 
+// Failures that only say something about THIS candidate; the next one (any provider or tier) may answer.
+const NEXT_CANDIDATE: readonly ProviderErrorCategory[] = ["unavailable", "rate_limited", "quota", "network", "timeout", "unsupported_model", "bad_output"];
+// Failures of the provider's account or of the request as that provider sees it: only ANOTHER provider can help.
+const OTHER_PROVIDER_ONLY: readonly ProviderErrorCategory[] = ["auth", "invalid_request", "context_overflow"];
+
 export async function runJob(
   deps: OrchestratorDeps,
   jobType: JobType,
@@ -137,6 +164,18 @@ export async function runJob(
   let fallback = false;
   let tier: Tier | undefined;
   let model: string | undefined;
+  let provider: ProviderId | undefined;
+  let category: TaskCategory | undefined;
+  let routeReason: string | undefined;
+  let candidates: Candidate[] = [];
+  // Candidates that failed for good during this run (`provider:model`): later calls of the same run skip them.
+  const exhausted = new Set<string>();
+  let lastCandidate = -1;
+  const attemptLog: AttemptRecord[] = [];
+  let successfulCalls = 0;
+  let unreportedCalls = 0;
+  let costKnown = true;
+  let baselineTokensEstimate = 0;
   let contextTokensEstimate = 0;
   let contextOmitted = 0;
 
@@ -158,6 +197,14 @@ export async function runJob(
     usage,
     tier,
     model,
+    provider,
+    category,
+    routeReason,
+    attemptLog,
+    usageReported: successfulCalls > 0 && unreportedCalls === 0,
+    costKnown: costKnown && successfulCalls > 0,
+    baselineTokensEstimate,
+    techniques: techniquesApplied(),
     costUsd: Math.round(costUsd * 1e6) / 1e6,
     turns,
     toolCalls,
@@ -179,6 +226,7 @@ export async function runJob(
     const input = parsed.data;
     const files = await deps.reader.listFiles();
     if (!files.some((f) => f.hasText)) throw new RunFailure("no_source");
+    baselineTokensEstimate = estimateBaselineTokens(files);
 
     await move("retrieving_context");
     const standard = deps.registry.models.standard;
@@ -198,7 +246,15 @@ export async function runJob(
     contextOmitted = context.omitted;
     const lineCounts = new Map(context.lineCounts);
     tier = chooseTier({ job: jobType, promptChars: (job.promptChars as (i: unknown) => number)(input), contextTokens: contextTokensEstimate });
-    model = deps.registry.models[tier]?.id;
+    const plan = planRoute({ job: jobType, tier, contextTokens: contextTokensEstimate, reservedOutput: job.reservedOutput, registry: deps.registry, cooldowns: deps.cooldowns, needsTools: job.tools.length > 0 });
+    category = plan.category;
+    candidates = plan.candidates.filter((c) => adapterFor(c) !== undefined);
+    if (candidates.length === 0) throw new RunFailure(plan.candidates.length > 0 ? "not_configured" : emptyPlanCategory(plan));
+    routeReason = candidates[0].reason;
+    tier = candidates[0].tier;
+    // `provider` stays unset until a call succeeds: it names who ANSWERED, and the attempt log names who was tried.
+    model = candidates[0].model.id;
+    deps.onEvent?.({ type: "route", category: plan.category, provider: candidates[0].provider, model, reason: routeReason });
 
     const turnsList: LlmTurn[] = [{ role: "user", text: (job.userPrompt as (i: unknown, c: JobContext) => string)(input, context) }];
     const outputJsonSchema = withoutMeta(z.toJSONSchema(job.outputSchema) as Record<string, unknown>);
@@ -301,17 +357,42 @@ export async function runJob(
     }
   }
 
-  // One model call with bounded retries for transient failures, then fallback DOWN to a cheaper tier when the chosen
-  // model stays unavailable, rate limited or out of quota. Other failures end the run.
+  function adapterFor(candidate: Candidate): LlmProvider | undefined {
+    return deps.providers ? deps.providers[candidate.provider] : deps.provider;
+  }
+
+  // What the pipeline did to keep the request small, from what this run actually did.
+  function techniquesApplied(): string[] {
+    const list: string[] = [];
+    if (options.contextMode === "naive") return ["whole repository in context (evaluation baseline)"];
+    list.push("retrieval-based context selection", "secret redaction");
+    if (jobType === "code_review" || jobType === "code_qa") list.push("excerpt line caps");
+    if (contextOmitted > 0) list.push("context trimmed to the token budget");
+    if (toolCalls > 0) list.push("on-demand tool reads");
+    if (usage.cachedInputTokens > 0) list.push("provider prompt caching");
+    return list;
+  }
+
+  // One model call: candidates in the router's order, each with bounded retries for transient failures (retry.ts), then on to
+  // the next eligible candidate. A candidate that fails for good is skipped for the rest of the run, so one dead provider
+  // costs one failed call, not one per turn. Safety blocks end the run: another model would only be asked to bypass them.
   async function callModel(request: Omit<LlmRequest, "model" | "signal">): Promise<LlmResponse> {
-    const chain = deps.registry.fallbackChain(tier ?? "standard");
     let last: LlmError | null = null;
-    for (const candidate of chain) {
-      const spec = deps.registry.models[candidate] ?? deps.registry.models.standard;
-      if (candidate !== chain[0]) {
-        fallback = true;
-        deps.onEvent?.({ type: "fallback", from: chain[0], to: candidate });
+    for (let index = 0; index < candidates.length; index++) {
+      const candidate = candidates[index];
+      const key = `${candidate.provider}:${candidate.model.id}`;
+      if (exhausted.has(key)) continue;
+      const adapter = adapterFor(candidate);
+      if (!adapter) continue;
+      if (index > 0) fallback = true;
+      if (lastCandidate >= 0 && lastCandidate !== index) {
+        const from = candidates[lastCandidate];
+        deps.onEvent?.({ type: "fallback", from: from.tier, to: candidate.tier, fromProvider: from.provider, toProvider: candidate.provider });
       }
+      lastCandidate = index;
+      // With another PROVIDER still available, a rate limit is not worth waiting for.
+      const otherProviderLeft = candidates.slice(index + 1).some((c) => c.provider !== candidate.provider && !exhausted.has(`${c.provider}:${c.model.id}`) && adapterFor(c));
+
       for (let attempt = 0; attempt < RETRY_POLICY.maxAttempts; attempt++) {
         await checkpoint(true);
         const remaining = deadlineMs - (deps.now() - started);
@@ -319,20 +400,30 @@ export async function runJob(
         const call = callSignal(options.signal, Math.max(1, Math.min(ORCHESTRATOR_LIMITS.perCallTimeoutMs, remaining)));
         attempts++;
         const t0 = deps.now();
+        // Wall clock for the attempt log, so reading it does not advance a scripted test clock.
+        const wall0 = Date.now();
         try {
           // Raced against the call's own signal too: a provider that ignores aborts still cannot hold the run.
           const response = await Promise.race([
-            deps.provider.generate({ ...request, model: spec.id, signal: call.signal }),
+            adapter.generate({ ...request, model: candidate.model.id, signal: call.signal }),
             new Promise<never>((_, reject) =>
               call.signal.addEventListener("abort", () => reject(new LlmError("timeout", "The call was aborted.")), { once: true }),
             ),
           ]);
-          tier = candidate;
-          model = spec.id;
+          tier = candidate.tier;
+          model = candidate.model.id;
+          provider = candidate.provider;
+          const reported = response.usageReported !== false;
           usage = addUsage(usage, response.usage);
-          costUsd += deps.registry.estimateCostUsd(candidate, response.usage);
+          successfulCalls++;
+          if (!reported) unreportedCalls++;
+          // The provider's own cost wins; otherwise the price table; an unknown price is "unavailable", not free.
+          const cost = response.costUsd ?? (reported ? deps.registry.costFor(candidate.model, response.usage) : null);
+          if (cost === null) costKnown = false;
+          else costUsd += cost;
           call.dispose();
-          deps.onEvent?.({ type: "model", tier: candidate, model: spec.id, ms: deps.now() - t0, usage: response.usage, attempt });
+          if (attemptLog.length < 12) attemptLog.push({ provider: candidate.provider, model: candidate.model.id, tier: candidate.tier, outcome: "ok", ms: Date.now() - wall0, usageReported: reported });
+          deps.onEvent?.({ type: "model", tier: candidate.tier, provider: candidate.provider, model: candidate.model.id, ms: deps.now() - t0, usage: response.usage, attempt });
           return response;
         } catch (error) {
           call.dispose();
@@ -341,7 +432,9 @@ export async function runJob(
           // The call's timeout was the run's remaining time, so this is the run deadline, not a slow provider.
           if (llm.category === "timeout" && cappedByDeadline) throw new Stop("timed_out");
           last = llm;
-          if (isRetryable(llm.category) && attempt < RETRY_POLICY.maxAttempts - 1) {
+          if (attemptLog.length < 12) attemptLog.push({ provider: candidate.provider, model: candidate.model.id, tier: candidate.tier, outcome: llm.category, ms: Date.now() - wall0, usageReported: false });
+          deps.cooldowns?.note(candidate.provider, candidate.model.id, llm.category, llm.retryAfterSeconds);
+          if (isRetryable(llm.category) && attempt < RETRY_POLICY.maxAttempts - 1 && !(llm.category === "rate_limited" && otherProviderLeft)) {
             const delay = backoffMillis(attempt, llm.retryAfterSeconds, deps.random ?? Math.random);
             if (deps.now() - started + delay > deadlineMs) break;
             deps.onEvent?.({ type: "retry", category: llm.category, delayMs: delay });
@@ -351,8 +444,18 @@ export async function runJob(
           break;
         }
       }
-      // A per-call timeout here is a hung, overloaded model (deadline-capped calls already ended the run as timed_out).
-      if (!last || !["unavailable", "rate_limited", "quota", "network", "timeout"].includes(last.category)) break;
+
+      exhausted.add(key);
+      if (!last) break;
+      if (last.category === "auth") for (const c of candidates) if (c.provider === candidate.provider) exhausted.add(`${c.provider}:${c.model.id}`);
+      // A context overflow rules out every model that is not larger than this one.
+      if (last.category === "context_overflow") for (const c of candidates) if (c.model.contextLimit <= candidate.model.contextLimit) exhausted.add(`${c.provider}:${c.model.id}`);
+      if (NEXT_CANDIDATE.includes(last.category)) continue;
+      if (OTHER_PROVIDER_ONLY.includes(last.category)) {
+        for (const c of candidates) if (c.provider === candidate.provider) exhausted.add(`${c.provider}:${c.model.id}`);
+        continue;
+      }
+      break;
     }
     throw new RunFailure(last?.category ?? "internal");
   }

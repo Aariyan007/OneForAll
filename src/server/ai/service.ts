@@ -5,9 +5,12 @@ import { JOBS } from "./jobs";
 import { modelRegistry } from "./models";
 import { type RunEvent, type RunOutcome, runJob } from "./orchestrator";
 import { createGeminiProvider } from "./provider/gemini";
+import { createGroqProvider, createOpenRouterProvider } from "./provider/hosted";
+import type { LlmProvider } from "./provider/types";
+import { PROCESS_COOLDOWNS } from "./routing";
 import { createRunStore, createSnapshotReader } from "./supabase";
 import { checkSyntax } from "./syntax";
-import type { JobType } from "./types";
+import type { JobType, ProviderId } from "./types";
 
 // Starts and runs one AI job for the signed-in user. INTERNAL and server-only (not a Server Action): the caller has
 // verified the session and the project chain, and passes the project and snapshot ids it resolved from the database.
@@ -21,8 +24,24 @@ export function aiConfigured(): boolean {
   return modelRegistry(process.env).configured;
 }
 
+// Which providers this server can use, by name only: never keys, never model ids with secrets. For the page's notices.
+export function configuredProviders(): ProviderId[] {
+  const registry = modelRegistry(process.env);
+  return (Object.keys(registry.providers) as ProviderId[]).filter((id) => registry.providers[id].configured);
+}
+
+// One adapter per CONFIGURED provider, built from the server's environment on each run. The router only offers candidates
+// whose adapter exists, so an unconfigured provider is skipped, never called.
+function createProviders(registry: ReturnType<typeof modelRegistry>): Partial<Record<ProviderId, LlmProvider>> {
+  const providers: Partial<Record<ProviderId, LlmProvider>> = {};
+  if (registry.providers.gemini.configured) providers.gemini = createGeminiProvider(registry.providers.gemini.apiKey!);
+  if (registry.providers.groq.configured) providers.groq = createGroqProvider(registry.providers.groq.apiKey!);
+  if (registry.providers.openrouter.configured) providers.openrouter = createOpenRouterProvider(registry.providers.openrouter.apiKey!);
+  return providers;
+}
+
 export async function startRun(snapshotId: string, job: JobType, input: unknown): Promise<StartResult> {
-  if (!aiConfigured()) return { ok: false, status: 503, error: "The AI assistant is not configured on this server (GEMINI_API_KEY is missing)." };
+  if (!aiConfigured()) return { ok: false, status: 503, error: "The AI assistant is not configured on this server (set GEMINI_API_KEY, GROQ_API_KEY or OPENROUTER_API_KEY)." };
   const parsed = JOBS[job].inputSchema.safeParse(input);
   if (!parsed.success) return { ok: false, status: 400, error: `The request is not valid: ${parsed.error.issues[0]?.message ?? "invalid input"}.` };
   const supabase = await createClient();
@@ -56,7 +75,8 @@ export async function executeRun(
   const store = await createRunStore(run.runId);
   const outcome = await runJob(
     {
-      provider: createGeminiProvider(registry.apiKey!),
+      providers: createProviders(registry),
+      cooldowns: PROCESS_COOLDOWNS,
       registry,
       reader: await createSnapshotReader(run.snapshotId, run.projectId),
       store,
@@ -85,7 +105,11 @@ export async function executeRun(
       status: outcome.status,
       errorCategory: outcome.error?.category ?? null,
       tier: outcome.tier ?? null,
+      provider: outcome.provider ?? null,
       model: outcome.model ?? null,
+      category: outcome.category ?? null,
+      route: outcome.attemptLog.map((a) => `${a.provider}:${a.outcome}`),
+      usageReported: outcome.usageReported,
       turns: outcome.turns,
       toolCalls: outcome.toolCalls,
       attempts: outcome.attempts,

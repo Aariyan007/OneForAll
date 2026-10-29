@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { AiUsageCard } from "@/components/ai/usage-card";
 import { MyBugsList } from "@/components/bugs/my-bugs-list";
 import { Alert } from "@/components/ui/alert";
 import { ButtonLink } from "@/components/ui/button";
@@ -20,6 +21,7 @@ import { StatusBadge } from "@/components/ui/status";
 import { describeMyBugs } from "@/lib/bugs/my-bugs";
 import { listMyWorkspaces } from "@/lib/workspaces";
 import { requireUser } from "@/server/auth/session";
+import { getMyAiUsage } from "@/server/ai/usage";
 import { getMyBugs } from "@/server/bugs/overview";
 import { listMyInvitations, listMySuspendedMemberships } from "@/server/members/queries";
 import { getProfile } from "@/server/profiles/queries";
@@ -37,12 +39,13 @@ const HIERARCHY = [
 
 export default async function DashboardPage() {
   const user = await requireUser();
-  const [profile, organizations, invitations, suspended, myBugsResult] = await Promise.all([
+  const [profile, organizations, invitations, suspended, myBugsResult, aiUsage] = await Promise.all([
     getProfile(user.id),
     listMyWorkspaces(user.id),
     listMyInvitations(),
     listMySuspendedMemberships(),
     getMyBugs(user.id),
+    getMyAiUsage(user.id),
   ]);
   const myBugs = describeMyBugs(myBugsResult);
   const name = profile?.display_name ?? profile?.email ?? "there";
@@ -95,6 +98,8 @@ export default async function DashboardPage() {
           </p>
         </section>
       )}
+
+      <AiUsageCard usage={aiUsage} />
 
       {invitations.length > 0 && (
         <section className="mt-8" aria-labelledby="invitations-heading">

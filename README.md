@@ -94,6 +94,8 @@ If an existing route shows the not-found page in development, run `npm run dev:c
 | `STRUCTURE_PERSIST_KEY` | **yes** | for ingestion | 32+ random characters; the same value is stored in Vault as `structure_persist_key` |
 | `INTEGRATION_ENCRYPTION_KEY` | **yes** | for GitHub/Jira tokens | 32+ random characters; server only, not stored in Vault |
 | `GEMINI_API_KEY` | **yes** | for the AI Assistant | Google Gemini API key; server only |
+| `GROQ_API_KEY` | **yes** | optional AI provider | Groq API key; server only. Set at least one of the three AI keys |
+| `OPENROUTER_API_KEY` | **yes** | optional AI provider | OpenRouter API key; server only |
 | `APP_URL` | no | no | Public origin for invitation links when the app is shared (for example a tunnel URL) |
 | `SMTP_USER`, `SMTP_PASSWORD` | **yes** (password) | for invitation emails | Gmail address and app password |
 
