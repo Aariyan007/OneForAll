@@ -1,5 +1,6 @@
+import type { Content, Part } from "@google/genai";
 import type { Usage } from "../types";
-import { LlmError } from "./types";
+import { LlmError, type LlmRequest } from "./types";
 
 // Pure mapping from Gemini API failures and usage metadata to the provider-neutral shapes. Kept free of the SDK so it
 // is unit-tested without network. The provider's own message is matched but never copied into the error: it can echo
@@ -44,4 +45,32 @@ export function mapUsage(usage: UsageLike | undefined): Usage {
     cachedInputTokens: usage?.cachedContentTokenCount ?? 0,
     thinkingTokens: usage?.thoughtsTokenCount ?? 0,
   };
+}
+
+// A model turn from this adapter keeps Gemini's own Content as `raw`. A turn from another provider (after a failover) is
+// replayed as text: Gemini 3 requires the thought signatures of its own function calls, which a foreign call cannot carry.
+export function isGeminiContent(raw: unknown): raw is Content {
+  return typeof raw === "object" && raw !== null && (raw as Content).role === "model" && Array.isArray((raw as Content).parts);
+}
+
+export function toContents(request: LlmRequest): Content[] {
+  let nativeBefore = false;
+  return request.turns.map((turn): Content => {
+    if (turn.role === "user") return { role: "user", parts: [{ text: turn.text }] };
+    if (turn.role === "model") {
+      nativeBefore = isGeminiContent(turn.raw);
+      if (isGeminiContent(turn.raw)) return turn.raw;
+      const calls = turn.toolCalls.map((c) => `${c.name}(${JSON.stringify(c.args).slice(0, 300)})`);
+      const text = [turn.text, calls.length > 0 ? `[Called tools: ${calls.join("; ")}]` : null].filter(Boolean).join("\n");
+      return { role: "model", parts: [{ text: text || "[no reply]" }] };
+    }
+    if (!nativeBefore) {
+      const results = turn.results.map((r) => `${r.name}: ${JSON.stringify(r.result).slice(0, 20_000)}`).join("\n");
+      return { role: "user", parts: [{ text: `Results of the tools you called:\n${results}` }] };
+    }
+    return {
+      role: "user",
+      parts: turn.results.map((r): Part => ({ functionResponse: { id: r.id, name: r.name, response: r.result } })),
+    };
+  });
 }

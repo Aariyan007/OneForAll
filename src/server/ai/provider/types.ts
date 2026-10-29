@@ -31,6 +31,11 @@ export type LlmResponse = {
   toolCalls: LlmToolCall[];
   finishReason: FinishReason;
   usage: Usage;
+  // False when the provider sent no usage metadata: `usage` is then zeros and must not be read as a measurement.
+  // Absent means reported (adapters that always report, and the scripted fake).
+  usageReported?: boolean;
+  // Cost in USD when the provider itself reports it (OpenRouter's usage.cost); otherwise absent.
+  costUsd?: number;
   raw: unknown;
   modelVersion?: string;
 };

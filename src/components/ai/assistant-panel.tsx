@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Spinner, buttonClass } from "@/components/ui/button";
+import { describeUsage, providerLabel, type RunMetrics } from "@/lib/ai/present";
 import { cx } from "@/lib/cx";
 import { ResultView } from "./result-view";
 
@@ -51,18 +52,46 @@ type Run = {
   toolCalls: number;
   modelCalls: number;
   mine: boolean;
+  metrics: RunMetrics | null;
 };
+// What the run route sends when a run ends: the numbers of the persisted run plus what only the live result has.
 type Metrics = {
+  provider: string | null;
   model: string | null;
+  usageReported: boolean;
+  costKnown: boolean;
+  baselineTokensEstimate: number | null;
+  contextTokensEstimate: number;
+  techniques: string[];
+  attemptLog: RunMetrics["attemptLog"];
   usage: { inputTokens: number; outputTokens: number; cachedInputTokens: number; thinkingTokens: number };
   costUsd: number;
   turns: number;
+  attempts: number;
   toolCalls: number;
   fallback: boolean;
   citationsDropped: number;
   syntaxValid: boolean | null;
   durationMs: number;
 };
+
+const toRunMetrics = (m: Metrics): RunMetrics => ({
+  provider: m.provider,
+  model: m.model,
+  usageReported: m.usageReported,
+  inputTokens: m.usage.inputTokens,
+  outputTokens: m.usage.outputTokens,
+  thinkingTokens: m.usage.thinkingTokens,
+  cachedInputTokens: m.usage.cachedInputTokens,
+  costUsd: m.costUsd,
+  costKnown: m.costKnown,
+  attempts: m.attempts,
+  fallback: m.fallback,
+  baselineTokensEstimate: m.baselineTokensEstimate,
+  contextTokensEstimate: m.contextTokensEstimate,
+  techniques: m.techniques,
+  attemptLog: m.attemptLog,
+});
 type Finished = { job: Job; status: string; output: Record<string, unknown> | null; error: { category: string; message: string } | null; metrics: Metrics | null };
 
 export function AssistantPanel(props: {
@@ -73,6 +102,7 @@ export function AssistantPanel(props: {
   files: string[];
   requirements: { id: string; title: string; status: string }[];
   configured: boolean;
+  providers: string[];
   enabled: boolean;
   initialTab: Tab;
   initialRequirementId?: string;
@@ -98,6 +128,9 @@ export function AssistantPanel(props: {
   const [finished, setFinished] = useState<Finished | null>(null);
   const [requestError, setRequestError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  // Set synchronously when a run starts. `running` is state and still reads false until React re-renders, so two quick
+  // submits (double click, held Enter) would both pass a check on it and start two runs.
+  const busyRef = useRef(false);
 
   useEffect(() => {
     if (!running) return;
@@ -124,13 +157,14 @@ export function AssistantPanel(props: {
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
-    if (disabled || running) return;
+    if (disabled || running || busyRef.current) return;
     const input = inputFor();
     if (typeof input === "string") {
       setRequestError(input);
       return;
     }
     const job = TAB_JOB[tab];
+    busyRef.current = true;
     setRequestError(null);
     setFinished(null);
     setSteps([]);
@@ -170,6 +204,7 @@ export function AssistantPanel(props: {
     } catch {
       if (!controller.signal.aborted) setRequestError("The connection was interrupted. The run stops when the connection closes.");
     } finally {
+      busyRef.current = false;
       setRunning(false);
       abortRef.current = null;
     }
@@ -182,7 +217,10 @@ export function AssistantPanel(props: {
       if (event.type === "state" && event.state) setSteps((s) => [...s, event.state!]);
       if (event.type === "tool" && event.name) setTools((t) => [...t, event.name!]);
       if (event.type === "retry") setNotes((n) => [...n, `The model was busy (${event.category}); retrying.`]);
-      if (event.type === "fallback") setNotes((n) => [...n, `Switched from the ${event.from} model to the ${event.to} model.`]);
+      if (event.type === "fallback") {
+        const named = event as { fromProvider?: string; toProvider?: string };
+        setNotes((n) => [...n, named.toProvider && named.toProvider !== named.fromProvider ? `Switched from ${providerLabel(named.fromProvider)} to ${providerLabel(named.toProvider)}.` : `Switched from the ${event.from} model to the ${event.to} model.`]);
+      }
     }
     if (line.type === "result") {
       setFinished({
@@ -198,6 +236,7 @@ export function AssistantPanel(props: {
   async function cancel() {
     if (runId) await fetch(`${props.projectPath}/ai/runs/${runId}/cancel`, { method: "POST" }).catch(() => undefined);
     abortRef.current?.abort();
+    busyRef.current = false;
     setRunning(false);
     setFinished({ job: TAB_JOB[tab], status: "cancelled", output: null, error: { category: "cancelled", message: "Cancelled." }, metrics: null });
   }
@@ -208,7 +247,7 @@ export function AssistantPanel(props: {
     <div className="flex flex-col gap-5">
       {!props.configured && (
         <Alert tone="warning" title="The AI assistant is not configured">
-          An administrator must set GEMINI_API_KEY on the server (see docs/manual-setup-checklist.md).
+          An administrator must set GEMINI_API_KEY, GROQ_API_KEY or OPENROUTER_API_KEY on the server (see docs/manual-setup-checklist.md).
         </Alert>
       )}
       {props.configured && !props.enabled && (
@@ -217,8 +256,10 @@ export function AssistantPanel(props: {
         </Alert>
       )}
       <Alert tone="info" title="What is sent to the AI provider">
-        Your request and the relevant code excerpts of the selected snapshot are sent to Google Gemini (free tier: Google may use them to
-        improve its products). Recognisable secrets are redacted first. Do not use it on code you may not share.
+        Your request and the relevant code excerpts of the selected snapshot are sent to one of the AI providers this server uses
+        ({props.providers.length > 0 ? props.providers.map((p) => providerLabel(p)).join(", ") : "none configured"}), chosen per task; if one is
+        unavailable the same request goes to the next. On free tiers a provider may use requests to improve its products. Recognisable secrets
+        are redacted first. Do not use it on code you may not share.
       </Alert>
 
       <div className="flex flex-col gap-1.5 sm:max-w-md">
@@ -396,19 +437,32 @@ export function AssistantPanel(props: {
   );
 }
 
+function UsageBlock({ metrics, costLabel }: { metrics: RunMetrics; costLabel?: string }) {
+  const usage = describeUsage(metrics, { costLabel });
+  return (
+    <div className="space-y-0.5">
+      <div>{[usage.model, `${metrics.attempts} provider call${metrics.attempts === 1 ? "" : "s"}`].filter(Boolean).join(" · ")}</div>
+      <div>Tokens: {usage.tokens}</div>
+      <div>{usage.savings}</div>
+      <div>{usage.cost}</div>
+      {usage.routing.map((line) => (
+        <div key={line} className="text-warning">
+          {line}
+        </div>
+      ))}
+      {usage.techniques && <div>Applied: {usage.techniques}</div>}
+    </div>
+  );
+}
+
 function MetricsLine({ metrics }: { metrics: Metrics }) {
-  const parts = [
-    metrics.model,
-    `${metrics.usage.inputTokens.toLocaleString()} in / ${metrics.usage.outputTokens.toLocaleString()} out tokens`,
-    `${metrics.turns} model call${metrics.turns === 1 ? "" : "s"}, ${metrics.toolCalls} tool call${metrics.toolCalls === 1 ? "" : "s"}`,
-    `${(metrics.durationMs / 1000).toFixed(1)} s`,
-    `est. paid-tier cost $${metrics.costUsd.toFixed(4)}`,
-  ].filter(Boolean);
   return (
     <div className="mt-4 border-t border-border pt-3 text-[12px] text-fg-3">
-      {parts.join(" · ")}
+      <UsageBlock metrics={toRunMetrics(metrics)} costLabel={metrics.provider === "gemini" ? "est. paid-tier cost" : undefined} />
+      <div className="mt-1">
+        {metrics.turns} model call{metrics.turns === 1 ? "" : "s"}, {metrics.toolCalls} tool call{metrics.toolCalls === 1 ? "" : "s"} · {(metrics.durationMs / 1000).toFixed(1)} s
+      </div>
       {metrics.citationsDropped > 0 && <div>{metrics.citationsDropped} reference(s) the model gave did not match the snapshot and were removed.</div>}
-      {metrics.fallback && <div>Answered by a smaller fallback model because the main model was unavailable.</div>}
       {metrics.syntaxValid === false && <div className="text-warning">The generated tests still have syntax errors; review them before use.</div>}
       {metrics.syntaxValid === true && <div>The generated tests parse without syntax errors (not run).</div>}
     </div>
@@ -441,7 +495,10 @@ function RunHistory({ runs, viewerHref }: { runs: Run[]; viewerHref: (l: { path:
               <Badge tone={run.status === "completed" ? "success" : run.status === "failed" || run.status === "timed_out" ? "danger" : "muted"}>{run.status.replace("_", " ")}</Badge>
               <span className="text-fg-2">{JOB_LABELS[run.jobType] ?? run.jobType}</span>
               <span className="min-w-0 flex-1 truncate text-fg">{summary(run)}</span>
-              <span className="text-[12px] text-fg-3">{new Date(run.createdAt).toLocaleString()}</span>
+              {/* Formatted in the viewer's locale and time zone, which differ from the server's: without this React discards the server HTML on hydration. */}
+              <span className="text-[12px] text-fg-3" suppressHydrationWarning>
+                {new Date(run.createdAt).toLocaleString()}
+              </span>
               {!run.mine && <Badge tone="muted">teammate</Badge>}
               {run.output !== null && run.status === "completed" && (
                 <button type="button" className={buttonClass("ghost", "sm")} onClick={() => setOpen(open === run.id ? null : run.id)}>
@@ -453,10 +510,16 @@ function RunHistory({ runs, viewerHref }: { runs: Run[]; viewerHref: (l: { path:
             {open === run.id && run.output !== null && (
               <div className="mt-3">
                 <ResultView job={run.jobType} output={run.output as Record<string, unknown>} viewerHref={viewerHref} />
-                <p className="mt-3 text-[12px] text-fg-3">
-                  {run.model} · {run.inputTokens.toLocaleString()} in / {run.outputTokens.toLocaleString()} out tokens · {run.modelCalls} model calls, {run.toolCalls} tool
-                  calls · est. paid-tier cost ${run.costUsd.toFixed(4)}
-                </p>
+                <div className="mt-3 text-[12px] text-fg-3">
+                  {run.metrics ? (
+                    <UsageBlock metrics={run.metrics} costLabel={run.metrics.provider === "gemini" ? "est. paid-tier cost" : undefined} />
+                  ) : (
+                    <div>{run.model} · usage was not tracked for this run</div>
+                  )}
+                  <div className="mt-1">
+                    {run.modelCalls} model calls, {run.toolCalls} tool calls
+                  </div>
+                </div>
               </div>
             )}
           </li>

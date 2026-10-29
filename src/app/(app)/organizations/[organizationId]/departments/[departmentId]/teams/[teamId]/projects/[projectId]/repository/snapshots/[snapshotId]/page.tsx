@@ -50,6 +50,7 @@ export default async function SnapshotPage({
   const projectPath = `/organizations/${organization.id}/departments/${department.id}/teams/${team.id}/projects/${project.id}`;
   const snapshotsHref = `${projectPath}/repository/snapshots`;
   const graphHref = `${snapshotsHref}/${snapshot.id}/graph`;
+  const projectGraphHref = `${snapshotsHref}/${snapshot.id}/project-graph`;
   // Uploads go to the snapshot's upload Route Handler. The ids in that URL and in the bound action below are only
   // targets: both re-verify the whole chain from the database.
   const uploadUrl = `${snapshotsHref}/${snapshot.id}/source`;
@@ -97,10 +98,16 @@ export default async function SnapshotPage({
         }
         actions={
           <>
-            {graphReady && (
-              <ButtonLink href={graphHref} variant="primary">
+            {completed && (
+              <ButtonLink href={projectGraphHref} variant="primary">
                 <IconNetwork size={15} />
-                View Repository Graph
+                View Project Graph
+              </ButtonLink>
+            )}
+            {graphReady && (
+              <ButtonLink href={graphHref} variant="secondary">
+                <IconNetwork size={15} />
+                Symbol graph
               </ButtonLink>
             )}
             <ButtonLink href={snapshotsHref} variant="secondary">
@@ -305,10 +312,17 @@ export default async function SnapshotPage({
                   {analysis.error_message}
                 </Alert>
               )}
-              {graphReady && (
-                <ButtonLink href={graphHref} variant="primary">
+              {completed && (
+                <ButtonLink href={projectGraphHref} variant="primary">
                   <IconNetwork size={15} />
-                  View Repository Graph
+                  View Project Graph
+                  <IconArrowRight size={13} />
+                </ButtonLink>
+              )}
+              {graphReady && (
+                <ButtonLink href={graphHref} variant="secondary">
+                  <IconNetwork size={15} />
+                  Symbol graph
                   <IconArrowRight size={13} />
                 </ButtonLink>
               )}

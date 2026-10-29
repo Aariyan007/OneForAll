@@ -22,6 +22,8 @@ export class FakeProvider implements LlmProvider {
       toolCalls: value.toolCalls ?? [],
       finishReason: value.finishReason ?? "stop",
       usage: value.usage ?? { ...ZERO_USAGE, inputTokens: 100, outputTokens: 50 },
+      usageReported: value.usageReported,
+      costUsd: value.costUsd,
       raw: value.raw ?? { fake: true },
       modelVersion: request.model,
     };

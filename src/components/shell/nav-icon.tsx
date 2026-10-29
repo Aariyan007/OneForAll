@@ -1,4 +1,5 @@
 import {
+  IconAlert,
   IconBell,
   IconBox,
   IconBranch,
@@ -28,6 +29,7 @@ const ICONS = {
   settings: IconSettings,
   bell: IconBell,
   sparkle: IconSparkle,
+  alert: IconAlert,
 } as const;
 
 export function NavIcon({ name, size = 16 }: { name: string; size?: number }) {

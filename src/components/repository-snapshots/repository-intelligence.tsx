@@ -121,11 +121,15 @@ export async function RepositoryIntelligence({
           <Link href={`${repositoryPath}/snapshots/${imported.id}`} className="underline underline-offset-2">
             Open the snapshot
           </Link>
+          {" · "}
+          <Link href={`${repositoryPath}/snapshots/${imported.id}/project-graph`} className="underline underline-offset-2">
+            View the project graph
+          </Link>
           {importedAnalysis?.status === "COMPLETED" && (
             <>
               {" · "}
               <Link href={`${repositoryPath}/snapshots/${imported.id}/graph`} className="underline underline-offset-2">
-                View the repository graph
+                Symbol graph
               </Link>
             </>
           )}
@@ -244,10 +248,13 @@ export async function RepositoryIntelligence({
                           failed={analysis.files_failed}
                         />
                         <div>
-                          <ButtonLink href={`${repositoryPath}/snapshots/${analyzable.id}/graph`} variant="primary" size="sm">
+                          <ButtonLink href={`${repositoryPath}/snapshots/${analyzable.id}/project-graph`} variant="primary" size="sm">
                             <IconNetwork size={14} />
-                            View Repository Graph
+                            View Project Graph
                             <IconArrowRight size={13} />
+                          </ButtonLink>{" "}
+                          <ButtonLink href={`${repositoryPath}/snapshots/${analyzable.id}/graph`} variant="secondary" size="sm">
+                            Symbol graph
                           </ButtonLink>
                         </div>
                       </>

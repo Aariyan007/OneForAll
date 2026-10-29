@@ -21,7 +21,8 @@ const json = (body: unknown, status = 200) => NextResponse.json(body, { status, 
 
 const postSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("resolve"), branch: z.string().max(255), commit: z.string().max(64).optional().default("") }),
-  z.object({ op: z.literal("import"), branch: z.string().max(255), sha: z.string().regex(/^[0-9a-f]{40}$/) }),
+  // No SHA needed: the server resolves the branch tip and records the exact commit on the snapshot.
+  z.object({ op: z.literal("import"), branch: z.string().max(255), sha: z.string().regex(/^[0-9a-f]{40}$/).optional().default("") }),
 ]);
 
 type Ctx = RouteContext<"/organizations/[organizationId]/departments/[departmentId]/teams/[teamId]/projects/[projectId]/integrations/github">;

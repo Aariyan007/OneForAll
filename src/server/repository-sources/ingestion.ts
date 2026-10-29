@@ -9,7 +9,8 @@ import { getAnalysisReadiness } from "@/server/repository-structure/readiness";
 import { analyzeSnapshot } from "@/server/repository-structure/run";
 import type { SourceFile } from "@/server/repository-structure/source";
 import { type SourceArchive, countExclusions, matchesManifest, readSourceArchive } from "./archive";
-import { contentBatches } from "./contents";
+import { contentBatches, decodeStorableText } from "./contents";
+import { storeFileEdges } from "./file-edges";
 import { ARCHIVE_LIMITS, STALE_PROCESSING_MILLIS } from "./limits";
 import { createArchiveSourceProvider } from "./provider";
 import { ArchiveError } from "./zip";
@@ -141,6 +142,18 @@ async function storeContents(snapshotId: string, archive: SourceArchive): Promis
   return total;
 }
 
+// Import edges between the files of the snapshot (the dependency part of the project graph). Best effort: a failure
+// leaves the snapshot and its symbol graph intact and can be repaired with "Rebuild links" on the project graph page.
+async function storeEdges(snapshotId: string, archive: SourceArchive): Promise<void> {
+  const files: { path: string; content: string }[] = [];
+  for (const entry of archive.manifest) {
+    const bytes = archive.contents.get(entry.path);
+    const text = bytes ? decodeStorableText(bytes) : null;
+    if (text !== null) files.push({ path: entry.path, content: text });
+  }
+  await storeFileEdges(snapshotId, files).catch(() => null);
+}
+
 function contentsMessage(stored: number | null): string {
   return stored === null
     ? "The source text could not be stored for the AI assistant; upload the same archive again to retry."
@@ -205,6 +218,7 @@ export async function ingestSnapshotArchive(repositoryId: string, snapshotId: st
       return { ok: false, error: "The archive does not match the files recorded for this snapshot, so it cannot be used to analyse it." };
     }
     const stored = await storeContents(snapshot.id, archive);
+    await storeEdges(snapshot.id, archive);
     if (analysedAlready) return { ok: true, message: `Source matched the recorded manifest. ${contentsMessage(stored)}` };
     const analysisError = await analyse(snapshot.id, repositoryId, archive);
     return { ok: true, message: `Source matched the recorded manifest; structure analysis ran. ${contentsMessage(stored)}`, analysisError };
@@ -254,6 +268,7 @@ export async function ingestSnapshotArchive(repositoryId: string, snapshotId: st
   // 5. Source text for later reading (best effort, see above), then structure analysis (separate status). A failure
   //    in either does not undo the recorded manifest.
   const stored = await storeContents(snapshot.id, archive);
+  await storeEdges(snapshot.id, archive);
   const analysisError = await analyse(snapshot.id, repositoryId, archive);
   return { ok: true, message: `${summarize(archive)} ${contentsMessage(stored)}`, analysisError };
 }

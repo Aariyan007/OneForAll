@@ -196,7 +196,7 @@ export function GraphCanvas({
                 width={file.width + 24}
                 height={file.height + 22}
                 rx={12}
-                style={{ fill: "rgb(255 255 255 / 0.015)", stroke: "var(--border)" }}
+                style={{ fill: "var(--surface-2)", fillOpacity: 0.5, stroke: "var(--border)" }}
                 strokeDasharray="4 4"
               />
               <text x={file.x} y={file.y + FILE_HEADER - 18} style={{ fill: "var(--fg-3)" }} fontSize={12} fontFamily="var(--font-geist-mono), monospace">

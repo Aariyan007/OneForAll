@@ -69,6 +69,7 @@ export default async function AssistantPage({
           files={data.files}
           requirements={data.requirements}
           configured={data.configured}
+          providers={data.providers}
           enabled={data.enabled}
           initialTab={tab}
           initialRequirementId={requirement}
